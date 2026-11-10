@@ -1,0 +1,1735 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
+<title>メッセージ動画メーカー</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@500;700&family=Zen+Kaku+Gothic+New:wght@500;700&family=Zen+Maru+Gothic:wght@500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: 上に細いバー（名前と書き出し）、下は 素材の列｜大きなプレビューとタイムライン｜設定の列 の3列で画面いっぱい */
+:root {
+  --bg: #111215; --panel: #191b1f; --field: #22252a; --line: #2b2f35; --ink: #ecebe6; --muted: #8b9098;
+  --accent: #e1b06a; --accent-ink: #1b1408; --cut: #6f9e86; --msg-block: #4a4f57; --end: #c98f5a; --danger: #e48371;
+  --screen: #07080a;
+  --font-ui: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  --font-display: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #e8e7e3; --panel: #f7f6f2; --field: #eeede8; --line: #d7d5cf; --ink: #1d1e21; --muted: #696d73;
+    --accent: #a26c1f; --accent-ink: #ffffff; --cut: #4f8a6d; --msg-block: #3d4249; --end: #b0743d; --danger: #b6432f;
+    --screen: #0d0e10; color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #e8e7e3; --panel: #f7f6f2; --field: #eeede8; --line: #d7d5cf; --ink: #1d1e21; --muted: #696d73;
+  --accent: #a26c1f; --accent-ink: #ffffff; --cut: #4f8a6d; --msg-block: #3d4249; --end: #b0743d; --danger: #b6432f;
+  --screen: #0d0e10; color-scheme: light;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 14px; line-height: 1.55; margin: 0; }
+h1, h2 { margin: 0; }
+
+/* ---- 枠組み ---- */
+.wrap {
+  display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px;
+  padding-block: 10px 12px;
+  padding-left: max(14px, env(safe-area-inset-left, 0px));
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+}
+.layout { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr) minmax(270px, 310px); gap: 10px; min-height: 0; }
+@media (min-width: 1100px) {
+  html, body { height: 100%; overflow: hidden; }
+  .wrap { height: 100%; }
+}
+@media (max-width: 1099px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .stage { order: -1; }
+  .stage .screen { height: min(70vh, 620px); flex: none; }
+}
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; min-width: 0; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; scrollbar-width: thin; }
+
+/* ---- 上のバー ---- */
+.topbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-width: 0; }
+.brand { display: flex; align-items: baseline; gap: 12px; min-width: 0; margin-right: auto; }
+.brand h1 { font-family: var(--font-display); font-weight: 700; font-size: 1.25rem; letter-spacing: .08em; white-space: nowrap; }
+.brand p { margin: 0; color: var(--muted); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exportbox { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+.status { font-size: .82rem; margin: 0; color: var(--muted); max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status.err { color: var(--danger); white-space: normal; }
+.progress { width: 140px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.progress div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+/* ---- ボタンと入力 ---- */
+button, .btn {
+  font: inherit; font-size: .85rem; font-weight: 700; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--field); color: var(--ink); padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; line-height: 1.4;
+  transition: border-color .15s, background .15s, color .15s;
+}
+button:hover, .btn:hover { border-color: var(--muted); }
+button:focus-visible, .btn:focus-within, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); padding: 8px 18px; letter-spacing: .04em; }
+button.primary:hover { filter: brightness(1.06); }
+button.ghost { border-color: transparent; background: transparent; color: var(--muted); padding: 3px 7px; }
+button.ghost:hover { color: var(--ink); }
+button.danger:hover { color: var(--danger); }
+.btn input { display: none; }
+textarea, input[type=text], input[type=password], select, input[type=number] {
+  font: inherit; font-size: .88rem; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; width: 100%;
+}
+textarea { resize: vertical; min-height: 50px; font-family: var(--font-display); line-height: 1.6; }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
+
+/* ---- 見出し ---- */
+.sec { display: flex; flex-direction: column; gap: 8px; }
+.sec + .sec { border-top: 1px solid var(--line); padding-top: 12px; }
+.sec-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sec-h h2, .flabel { font-size: .72rem; font-weight: 700; letter-spacing: .14em; color: var(--muted); }
+.count { font-family: var(--font-mono); color: var(--accent); font-size: .75rem; margin-left: 6px; letter-spacing: 0; }
+.note { font-size: .76rem; color: var(--muted); margin: 0; line-height: 1.5; }
+
+/* ---- 左：カット ---- */
+.drop {
+  border: 1.5px dashed var(--line); border-radius: 10px; padding: 10px 12px; color: var(--muted); font-size: .8rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+}
+.loaderr { display: flex; gap: 6px; align-items: flex-start; border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); border-radius: 8px; padding: 8px 6px 8px 10px; }
+.loaderr p { margin: 0; font-size: .78rem; line-height: 1.55; color: var(--ink); flex: 1; }
+.drop.over { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.cuts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cut {
+  display: grid; grid-template-columns: 20px 72px minmax(0, 1fr) auto; gap: 8px 10px; align-items: center;
+  grid-template-areas: "no th nm ops" "ta ta ta ta" "sub sub sub sub";
+  padding: 10px; border-radius: 10px; background: color-mix(in srgb, var(--field) 55%, transparent); border: 1px solid transparent;
+}
+.cut:hover { border-color: var(--line); }
+.cut .no { grid-area: no; font-family: var(--font-mono); color: var(--accent); font-size: .78rem; align-self: start; padding-top: 2px; }
+.cut .thumb { grid-area: th; }
+.cut .fields { display: contents; }
+.cut .fname { grid-area: nm; align-self: start; padding-top: 2px; }
+.cut textarea { grid-area: ta; }
+.cut .subrow { grid-area: sub; }
+.cut .ops { grid-area: ops; flex-direction: row; align-self: start; }
+.thumb { width: 72px; aspect-ratio: 16/10; border-radius: 6px; overflow: hidden; background: var(--msg-block); position: relative; max-width: 100%; }
+.thumb canvas { width: 100%; height: 100%; display: block; }
+.badge { position: absolute; left: 4px; bottom: 4px; font-size: .62rem; background: rgba(0,0,0,.62); color: #fff; padding: 0 5px; border-radius: 3px; }
+.fields { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.fname { font-size: .72rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops { display: flex; flex-direction: column; gap: 0; }
+.ops button { padding: 1px 6px; font-size: .8rem; }
+.subrow { display: flex; gap: 4px; align-items: center; }
+.subrow textarea.sub { flex: 1; min-width: 0; font-size: .8rem; padding: 4px 8px; min-height: 0; resize: none; overflow: hidden; font-family: var(--font-ui); line-height: 1.5; }
+.subrow { align-items: flex-start; }
+.subrow button { flex: none; font-size: .74rem; padding: 3px 6px; color: var(--accent); }
+.addcut { align-self: stretch; justify-content: center; border-style: dashed; background: transparent; color: var(--accent); }
+.endcard { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; align-items: start; }
+.endcard .thumb { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: .7rem; background: var(--field); }
+.endcard img { max-width: 90%; max-height: 80%; object-fit: contain; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bgm-auto { display: flex; flex-direction: column; gap: 6px; }
+.bgm-auto select { flex: 1; min-width: 0; width: auto; }
+.vol { display: flex; align-items: center; gap: 8px; font-size: .78rem; color: var(--muted); }
+.vol input { flex: 1; min-width: 0; accent-color: var(--accent); }
+#bgmMode button[aria-pressed=true] { background: var(--ink); color: var(--panel); }
+.row .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14em; }
+
+/* ---- 中央：プレビュー ---- */
+.stage { gap: 10px; }
+.screen {
+  flex: 1; min-height: 0; background: var(--screen); border-radius: 10px; display: flex; justify-content: center; align-items: center; overflow: hidden;
+  background-image: radial-gradient(circle at 50% 40%, rgba(255,255,255,.04), transparent 60%);
+}
+.screen canvas, .screen video { max-width: 100%; max-height: 100%; display: block; box-shadow: 0 10px 40px rgba(0,0,0,.45); }
+.transport { display: flex; align-items: center; gap: 12px; }
+.transport input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+#playBtn { min-width: 84px; justify-content: center; }
+.tc { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--accent); font-size: .82rem; white-space: nowrap; }
+.strip { display: flex; height: 30px; border-radius: 6px; overflow: hidden; gap: 2px; }
+.strip div { min-width: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: .66rem; color: rgba(255,255,255,.85); overflow: hidden; white-space: nowrap; border-radius: 3px; transition: filter .15s; }
+.strip .s-cut { background: var(--cut); }
+.strip .s-text { background: var(--msg-block); }
+.strip .s-blank { background: color-mix(in srgb, var(--msg-block) 55%, transparent); }
+.strip .s-end { background: var(--end); }
+.strip div:hover { filter: brightness(1.15); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .72rem; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+.result { display: flex; gap: 8px; justify-content: center; }
+
+/* ---- 右：設定 ---- */
+.styles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.styles button { font-weight: 500; font-size: .8rem; padding: 6px 4px; justify-content: center; background: transparent; }
+.styles button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.pair label, .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: .72rem; color: var(--muted); }
+.pair select { font-size: .8rem; padding: 5px 6px; }
+.pair.stack { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.pair.three { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.pair.three label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pair.three input:disabled { opacity: .5; }
+.pair-wide { grid-template-columns: minmax(0, 4fr) minmax(0, 5fr); }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--field); }
+.seg button { border: 0; border-radius: 0; flex: 1 1 auto; justify-content: center; font-weight: 500; padding: 5px 6px; background: transparent; font-size: .8rem; white-space: nowrap; }
+.seg button[aria-pressed=true] { background: var(--ink); color: var(--panel); }
+.swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.sw { width: 24px; height: 24px; padding: 0; border-radius: 50%; background: var(--sw); border: 1px solid var(--line); box-shadow: inset 0 0 0 1px rgba(127,127,127,.25); }
+.sw[aria-pressed=true] { outline: 2px solid var(--accent); outline-offset: 2px; }
+.picker { display: inline-flex; flex-direction: row; align-items: center; gap: 5px; font-size: .74rem; color: var(--ink); cursor: pointer; border: 1px solid var(--line); border-radius: 14px; padding: 1px 8px 1px 2px; }
+.picker input { width: 20px; height: 20px; border: 0; padding: 0; background: none; border-radius: 50%; cursor: pointer; }
+.picker.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+.duration { display: flex; align-items: center; gap: 5px; color: var(--ink); font-size: .82rem; }
+.duration input { width: 4.6em; font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; padding: 4px 6px; }
+.pair input[type=number] { padding: 4px 8px; font-family: var(--font-mono); }
+
+/* ---- パスワード画面 ---- */
+.gate { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.gate-box { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 26px; display: flex; flex-direction: column; gap: 10px; }
+.gate-box h1 { font-family: var(--font-display); font-size: 1.3rem; letter-spacing: .06em; }
+.gate-box p { margin: 0; color: var(--muted); font-size: .85rem; }
+.gate-box .flabel { margin-top: 4px; }
+.gate-box button { justify-content: center; }
+.gate-box .status { white-space: normal; max-width: none; }
+
+@media (max-width: 520px) {
+  .brand p { display: none; }
+}
+/* 背の低い画面（ノートPCなど）では詰めて1画面に収める */
+@media (min-width: 1100px) and (max-height: 860px) {
+  .panel { padding: 10px 12px; gap: 8px; }
+  .sec { gap: 6px; }
+  .sec + .sec { padding-top: 8px; }
+  #styleDesc { display: none; }
+  .styles button { padding: 4px; }
+  .pair.stack { gap: 4px; }
+  .wrap { gap: 8px; padding-block: 8px 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .progress div, button, .strip div { transition: none; } }
+</style>
+
+<div class="gate" id="gate">
+  <form class="gate-box" id="gateForm" autocomplete="off">
+    <h1>メッセージ動画メーカー</h1>
+    <p>社内用のツールです。パスワードを入力してください。</p>
+    <label for="gatePw" class="flabel">パスワード</label>
+    <input type="password" id="gatePw" autocomplete="current-password">
+    <button class="primary" type="submit">開く</button>
+    <p class="status err" id="gateMsg" role="status"></p>
+  </form>
+</div>
+<script>
+(() => {
+  const HASH = '2aec73e30a920d50560c5ef05909502ef408a2e7c7c8a0c073f8705e414b8eed';
+  const gate = document.getElementById('gate');
+  const unlock = () => {
+    gate.hidden = true;
+    const w = document.querySelector('.wrap'); if (w) w.inert = false;
+  };
+  document.addEventListener('DOMContentLoaded', () => {
+    const w = document.querySelector('.wrap');
+    let ok = false;
+    try { ok = sessionStorage.getItem('mm-unlocked') === HASH; } catch (e) {}
+    if (ok) unlock(); else { if (w) w.inert = true; document.getElementById('gatePw').focus(); }
+  });
+  document.getElementById('gateForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const v = document.getElementById('gatePw').value;
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));
+    const hex = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    if (hex === HASH) {
+      try { sessionStorage.setItem('mm-unlocked', HASH); } catch (err) {}
+      unlock();
+    } else {
+      document.getElementById('gateMsg').textContent = 'パスワードが違います。もう一度入力してください';
+      document.getElementById('gatePw').select();
+    }
+  });
+})();
+</script>
+
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand">
+      <h1>メッセージ動画メーカー</h1>
+      <p>カット → 暗転してメッセージ → 次のカット。素材はこのパソコンの外に送られません</p>
+    </div>
+    <div class="exportbox">
+      <p class="status" id="status" role="status"></p>
+      <div class="progress" hidden id="prog"><div></div></div>
+      <button class="primary" id="exportBtn" type="button">動画を書き出す</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <section class="panel" aria-label="素材とメッセージ">
+      <div class="sec">
+        <div class="sec-h">
+          <h2>カットとメッセージ<span class="count" id="cutCount"></span></h2>
+          <button class="ghost danger" id="clearAll" type="button">すべて消す</button>
+        </div>
+        <div class="drop" id="drop">
+          <span>ここに写真・動画をドロップ</span>
+          <label class="btn" for="fileIn">素材を選ぶ<input id="fileIn" type="file" accept="image/*,video/*,.mov,.mp4,.m4v,.webm,.heic" multiple></label>
+        </div>
+        <div class="loaderr" id="loadErr" role="alert" hidden><p id="loadErrText"></p><button class="ghost" type="button" id="loadErrClose" aria-label="閉じる">×</button></div>
+        <ol class="cuts" id="cuts"></ol>
+        <p class="note" id="emptyNote" hidden>素材を追加すると、ここにカットが並びます。各カットの下に、その後に出すメッセージを書けます。</p>
+        <label class="btn addcut" for="addIn">＋ カットを追加<input id="addIn" type="file" accept="image/*,video/*,.mov,.mp4,.m4v,.webm,.heic" multiple></label>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><h2>最後の画面（任意）</h2><button class="ghost danger" id="logoClear" type="button" hidden>ロゴを外す</button></div>
+        <div class="endcard">
+          <div class="thumb" id="logoThumb">ロゴなし</div>
+          <div class="fields">
+            <label class="btn" for="logoIn" style="align-self:flex-start">ロゴ画像を選ぶ<input id="logoIn" type="file" accept="image/*"></label>
+            <input type="text" id="tagline" placeholder="締めの一言（例：これからも、となりで。）">
+          </div>
+        </div>
+      </div>
+
+
+    </section>
+
+    <section class="panel stage" aria-label="プレビュー">
+      <div class="screen" id="screen"><canvas id="preview" width="360" height="640"></canvas></div>
+      <div id="result" hidden class="result">
+        <button class="primary" id="saveBtn" type="button">動画を保存</button>
+        <button id="backBtn" type="button">プレビューに戻る</button>
+      </div>
+      <div class="transport">
+        <button id="playBtn" type="button" aria-label="再生">▶ 再生</button>
+        <input type="range" id="seek" min="0" max="1000" value="0" aria-label="再生位置">
+        <span class="tc" id="tc">00:00.0 / 00:00.0</span>
+      </div>
+      <div class="strip" id="strip" aria-label="タイムライン"></div>
+      <div class="legend"><span style="--c: var(--cut)">カット</span><span style="--c: var(--msg-block)">メッセージ・白紙</span><span style="--c: var(--end)">最後の画面</span><span>クリックでその場面へ</span></div>
+    </section>
+
+    <section class="panel" aria-label="設定">
+      <div class="sec">
+        <span class="flabel">スタイル</span>
+        <div class="styles" id="styles">
+          <button type="button" data-s="doc">ドキュメンタリー</button>
+          <button type="button" data-s="simple">シンプル</button>
+          <button type="button" data-s="pop">ポップ</button>
+          <button type="button" data-s="cinema">シネマ</button>
+          <button type="button" data-s="dynamic">ダイナミック</button>
+          <button type="button" data-s="elegant">エレガント</button>
+          <button type="button" data-s="tech">テック</button>
+          <button type="button" data-s="film">フィルム</button>
+        </div>
+        <p class="note" id="styleDesc"></p>
+        <div class="pair stack">
+          <label for="cutTr">カットの切り替え<select id="cutTr"></select></label>
+          <label for="textTr">文字の出し方<select id="textTr"></select></label>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="pair pair-wide">
+          <label>画面の形
+            <div class="seg" data-key="aspect"><button type="button" data-v="9:16">縦 9:16</button><button type="button" data-v="16:9">横 16:9</button></div>
+          </label>
+          <label>文字
+            <div class="seg" data-key="font"><button type="button" data-v="serif">明朝</button><button type="button" data-v="sans">ゴシック</button><button type="button" data-v="round">丸ゴ</button></div>
+          </label>
+        </div>
+        <div class="field">
+          <span>白紙画面・暗転の色 <span class="tc" id="bgHex"></span></span>
+          <div class="swatches" id="swatches">
+            <button type="button" class="sw" data-c="#000000" style="--sw:#000000" aria-label="黒" title="黒"></button>
+            <button type="button" class="sw" data-c="#ffffff" style="--sw:#ffffff" aria-label="白" title="白"></button>
+            <button type="button" class="sw" data-c="#f2ede3" style="--sw:#f2ede3" aria-label="生成り" title="生成り"></button>
+            <button type="button" class="sw" data-c="#1b2a41" style="--sw:#1b2a41" aria-label="紺" title="紺"></button>
+            <button type="button" class="sw" data-c="#1f3a2c" style="--sw:#1f3a2c" aria-label="深緑" title="深緑"></button>
+            <button type="button" class="sw" data-c="#4a1f2a" style="--sw:#4a1f2a" aria-label="えんじ" title="えんじ"></button>
+            <label class="picker" for="bgColor" title="好きな色を選ぶ"><input type="color" id="bgColor" aria-label="好きな色を選ぶ"><span>その他</span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="field">
+          <span title="指定すると、カットの秒数を自動で決めて全体をこの長さにします">全体の長さ（0分0.0秒＝指定しない）</span>
+          <div class="duration">
+            <input type="number" id="durMin" min="0" max="10" step="1" inputmode="numeric" aria-label="分"><span>分</span>
+            <input type="number" id="durSec" min="0" max="59.9" step="0.1" inputmode="decimal" aria-label="秒"><span>秒</span>
+          </div>
+        </div>
+        <div class="pair three">
+          <label for="cutSec" title="全体の長さを指定しているときは自動で決まります">カット（秒）<input type="number" id="cutSec" min="0.5" max="15" step="0.5"></label>
+          <label for="textSec" title="カットとカットの間に入る白紙画面（メッセージ）の秒数。0で挟まない">白紙・文字（秒）<input type="number" id="textSec" min="0" max="10" step="0.5"></label>
+          <label for="trSec" title="フェードなど切り替えにかける秒数。空欄ならスタイルのおすすめ">切り替え（秒）<input type="number" id="trSec" min="0" max="3" step="0.1"></label>
+        </div>
+      </div>
+      <div class="sec">
+        <span class="flabel">BGM <span class="note" style="letter-spacing:0;font-weight:500">自動で作る曲は無料・動画の長さぴったり</span></span>
+        <div class="seg" id="bgmMode">
+          <button type="button" data-m="none">なし</button>
+          <button type="button" data-m="auto">自動で作る</button>
+          <button type="button" data-m="file">ファイル</button>
+        </div>
+        <div class="bgm-auto" id="bgmAuto" hidden>
+          <div class="row">
+            <select id="musicKind" aria-label="曲調" title="ブラウザの中で、動画の長さぴったりの曲を作ります（無料）"></select>
+            <button type="button" id="reroll" title="同じ曲調で、別のメロディと和音にします">別の曲にする</button>
+          </div>
+        </div>
+        <div class="row" id="bgmFileRow" hidden>
+          <label class="btn" for="bgmIn">音楽ファイルを選ぶ<input id="bgmIn" type="file" accept="audio/*"></label>
+          <span class="note" id="bgmName">未選択</span>
+        </div>
+        <label class="vol" id="bgmVolRow" hidden for="bgmVol">音量<input type="range" id="bgmVol" min="0" max="100" step="5"><span class="tc" id="bgmVolTxt"></span></label>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.4/build/webm-muxer.js"></script>
+<script>
+(() => {
+  const FPS = 30;
+  const FONTS = {
+    serif: '"Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+    sans: '"Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif',
+    round: '"Zen Maru Gothic", "Hiragino Maru Gothic ProN", sans-serif',
+  };
+  const $ = (id) => document.getElementById(id);
+
+  // ---- 状態 ----
+  const S = { style: 'doc', aspect: '9:16', bg: '#000000', font: 'serif', target: 30, cutSec: 3.5, textSec: 2.5 };
+  try { Object.assign(S, JSON.parse(localStorage.getItem('mm-settings') || '{}')); } catch (e) {}
+  // 以前の保存形式からの読み替え
+  if (S.bg === 'black') S.bg = '#000000';
+  if (S.bg === 'white') S.bg = '#ffffff';
+  if (!/^#[0-9a-f]{6}$/i.test(S.bg)) S.bg = '#000000';
+  if ('fit' in S) { S.target = S.fit === 'none' ? 0 : Number(String(S.fit).split('-')[0]) || 30; delete S.fit; }
+  if (!Number.isFinite(S.target) || S.target < 0) S.target = 30;
+  delete S.fade;
+  if (!['doc', 'simple', 'pop', 'cinema', 'dynamic', 'elegant', 'tech', 'film'].includes(S.style)) S.style = 'doc';
+  if (typeof S.cutTr !== 'string') S.cutTr = '';
+  if (!(Number.isFinite(S.trSec) && S.trSec >= 0)) S.trSec = null;
+  if (!(Number.isFinite(S.textSec) && S.textSec >= 0)) S.textSec = 2.5;
+  if (typeof S.textTr !== 'string') S.textTr = '';
+  const saveSettings = () => { try { localStorage.setItem('mm-settings', JSON.stringify(S)); } catch (e) {} };
+
+  let cuts = [];       // {id, name, kind, src(ImageBitmap|HTMLVideoElement), w, h, duration, msg, sub, sample}
+  let logo = null;     // {bitmap, url}
+  let bgmFile = null;  // ユーザーが選んだ音楽ファイル
+  let bgmMode = 'none'; // 'none' | 'auto' | 'file'
+  let musicKind = '';   // '' はスタイルに合わせる
+  let musicSeed = 1;
+  let bgmVol = 0.8;
+  try {
+    const b = JSON.parse(localStorage.getItem('mm-bgm') || '{}');
+    if (b.mode === 'auto') bgmMode = 'auto';
+    if (typeof b.kind === 'string') musicKind = b.kind;
+    if (Number.isFinite(b.seed)) musicSeed = b.seed;
+    if (Number.isFinite(b.vol)) bgmVol = b.vol;
+  } catch (e) {}
+  const saveBgm = () => { try { localStorage.setItem('mm-bgm', JSON.stringify({ mode: bgmMode === 'file' ? 'none' : bgmMode, kind: musicKind, seed: musicSeed, vol: bgmVol })); } catch (e) {} };
+  const bgmActive = () => (bgmMode === 'auto') || (bgmMode === 'file' && !!bgmFile);
+  let tagline = '';
+  let timeline = { segs: [], total: 0 };
+  let curT = 0, playing = false, playFrom = 0, playClock = 0, exporting = false, resultBlob = null, resultExt = 'mp4';
+  let uid = 0;
+
+  // ---- 尺の計算 ----
+  // 並び：カット → 白紙画面（メッセージ） → カット … → 最後の画面
+  // 白紙画面とメッセージの秒数は指定どおり。全体の長さを指定したときは、カットの秒数だけで合わせる
+  function buildTimeline() {
+    const raw = [];
+    cuts.forEach((c, i) => {
+      raw.push({ type: 'cut', cut: c, idx: i, base: S.cutSec, limit: c.kind === 'video' ? c.duration : Infinity });
+      const lines = c.msg.split('\n').map((s) => s.trim()).filter(Boolean);
+      const hasMsg = lines.length > 0 || !!c.sub.trim();
+      const isLast = i === cuts.length - 1;
+      // メッセージがなくても、カットとカットの間には白紙画面を挟む（0秒なら挟まない）
+      if (S.textSec > 0 && (hasMsg || !isLast)) raw.push({ type: 'text', lines, sub: c.sub.trim(), idx: i, blank: !hasMsg, base: S.textSec, fixed: true });
+    });
+    if (logo || tagline.trim()) raw.push({ type: 'end', base: Math.max(2, S.textSec + 1), fixed: true });
+
+    const durs = raw.map((s) => (s.fixed ? s.base : Math.min(s.base, s.limit)));
+    if (S.target > 0) {
+      const fixedTotal = raw.reduce((a, s, i) => a + (s.fixed ? durs[i] : 0), 0);
+      let room = Math.max(0, S.target - fixedTotal);
+      // カットに均等に配り、動画の長さで頭打ちになった分はほかのカットへ回す
+      let open = raw.map((s, i) => (s.type === 'cut' ? i : -1)).filter((i) => i >= 0);
+      for (let k = 0; k < 6 && open.length; k++) {
+        const each = room / open.length;
+        const capped = open.filter((i) => raw[i].limit < each);
+        if (!capped.length) { open.forEach((i) => (durs[i] = each)); break; }
+        capped.forEach((i) => { durs[i] = raw[i].limit; room -= raw[i].limit; });
+        open = open.filter((i) => !capped.includes(i));
+      }
+    }
+    let t = 0;
+    const segs = raw.map((s, i) => {
+      const dur = Math.max(s.type === 'cut' ? 0.5 : 0.2, durs[i]);
+      const seg = { ...s, start: t, dur };
+      t += dur;
+      return seg;
+    });
+    timeline = { segs, total: t };
+  }
+  const segAt = (t) => timeline.segs.find((s) => t >= s.start && t < s.start + s.dur) || timeline.segs[timeline.segs.length - 1];
+
+  // ---- 描画 ----
+  const dims = (scale = 1) => {
+    const v = S.aspect === '9:16';
+    return { W: Math.round((v ? 1080 : 1920) * scale), H: Math.round((v ? 1920 : 1080) * scale) };
+  };
+  // 背景の明るさで文字色（白か濃いグレー）を決める
+  const colors = () => {
+    const n = parseInt(S.bg.slice(1), 16);
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+    return { bg: S.bg, fg: L > 0.35 ? '#16191a' : '#ffffff' };
+  };
+
+  // ---- トランジション ----
+  // T は切り替えにかける秒数（スタイルで上書きされる）
+  const CUT_TR = {
+    fade: { name: '暗転フェード', T: 0.6 },
+    cut: { name: 'カット（瞬時）', T: 0 },
+    slide: { name: '横スライド', T: 0.35 },
+    slideUp: { name: '縦スライド', T: 0.35 },
+    zoom: { name: 'ズーム', T: 0.3 },
+    wipe: { name: 'ワイプ（左から）', T: 0.45 },
+    circle: { name: '円形に開く', T: 0.5 },
+    blinds: { name: 'ブラインド', T: 0.5 },
+    blur: { name: 'ぼかし', T: 0.8 },
+    flash: { name: 'フラッシュ（白く光る）', T: 0.25 },
+    spin: { name: '回転', T: 0.45 },
+    glitch: { name: 'グリッチ（ノイズ）', T: 0.35 },
+  };
+  const TEXT_TR = {
+    fade: { name: 'フェード', T: 0.6 },
+    rise: { name: '下から浮かぶ', T: 0.8 },
+    drop: { name: '上から落ちる', T: 0.5 },
+    pop: { name: '弾んで出る', T: 0.35 },
+    slam: { name: '飛び込む', T: 0.25 },
+    blur: { name: 'ぼかしから', T: 0.7 },
+    tracking: { name: '字間が広がる', T: 0.7 },
+    typewriter: { name: 'タイプライター', T: 0.3 },
+    wipe: { name: '左から現れる', T: 0.5 },
+    circle: { name: '円形に開く', T: 0.45 },
+  };
+
+  // ---- スタイル（おすすめの組み合わせ） ----
+  const STYLES = {
+    doc: { name: 'ドキュメンタリー', desc: '暗転でゆっくり切り替え、文字は静かに浮かぶ。語りかける雰囲気', font: 'serif',
+      cut: 'fade', cutT: 0.6, zoom: 0.08, text: 'fade', textT: 0.6, weight: 500, spacing: 0.12, size: 1 },
+    simple: { name: 'シンプル', desc: 'パッと切り替え、余計な動きなし。説明・紹介向き', font: 'sans',
+      cut: 'cut', cutT: 0, zoom: 0, text: 'fade', textT: 0.2, weight: 500, spacing: 0.06, size: 1 },
+    pop: { name: 'ポップ', desc: '横にスライドして切り替え、文字が弾んで出てマーカーが付く。SNS・イベント向き', font: 'round',
+      cut: 'slide', cutT: 0.35, zoom: 0.04, text: 'pop', textT: 0.35, weight: 700, spacing: 0.04, size: 1.05, marker: true },
+    cinema: { name: 'シネマ', desc: '上下に黒帯、長めの暗転、文字はゆっくり上がる。映画の予告編風', font: 'serif',
+      cut: 'fade', cutT: 1.0, zoom: 0.05, text: 'rise', textT: 0.9, weight: 500, spacing: 0.3, size: 0.8, letterbox: true },
+    dynamic: { name: 'ダイナミック', desc: 'ズームで勢いよく切り替え、文字は大きく飛び込む。採用・スポーツ向き', font: 'sans',
+      cut: 'zoom', cutT: 0.3, zoom: 0.12, text: 'slam', textT: 0.25, weight: 700, spacing: 0.02, size: 1.15 },
+    elegant: { name: 'エレガント', desc: 'ぼかしでふわっと切り替え、字間がゆっくり広がる。美容・ブライダル・ホテル向き', font: 'serif',
+      cut: 'blur', cutT: 0.9, zoom: 0.05, text: 'tracking', textT: 0.8, weight: 500, spacing: 0.16, size: 0.9 },
+    tech: { name: 'テック', desc: 'ノイズが走って切り替え、文字はタイプライターで打たれる。IT・新サービス紹介向き', font: 'sans',
+      cut: 'glitch', cutT: 0.35, zoom: 0.03, text: 'typewriter', textT: 0.3, weight: 500, spacing: 0.05, size: 0.95 },
+    film: { name: 'フィルム', desc: '白く光って切り替え、文字は円形に開く。思い出・周年・卒業ムービー向き', font: 'serif',
+      cut: 'flash', cutT: 0.3, zoom: 0.07, text: 'circle', textT: 0.6, weight: 500, spacing: 0.1, size: 0.95 },
+  };
+  const st = () => STYLES[S.style] || STYLES.doc;
+  // スタイルに、個別に選んだ切り替え方を重ねたもの
+  const look = () => {
+    const sty = st();
+    const cut = S.cutTr && CUT_TR[S.cutTr] ? S.cutTr : sty.cut;
+    const text = S.textTr && TEXT_TR[S.textTr] ? S.textTr : sty.text;
+    return {
+      ...sty, cut, text,
+      cutT: S.trSec != null ? S.trSec : cut === sty.cut ? sty.cutT : CUT_TR[cut].T,
+      textT: S.trSec != null ? S.trSec : text === sty.text ? sty.textT : TEXT_TR[text].T,
+    };
+  };
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+  const easeOut = (p) => 1 - (1 - p) ** 3;
+  const easeInOut = (p) => (p < 0.5 ? 4 * p ** 3 : 1 - (-2 * p + 2) ** 3 / 2);
+  const easeOutBack = (p) => { const c = 1.7; return 1 + (c + 1) * (p - 1) ** 3 + c * (p - 1) ** 2; };
+  const easeOutBounce = (p) => {
+    const n = 7.5625, d = 2.75;
+    if (p < 1 / d) return n * p * p;
+    if (p < 2 / d) return n * (p -= 1.5 / d) * p + 0.75;
+    if (p < 2.5 / d) return n * (p -= 2.25 / d) * p + 0.9375;
+    return n * (p -= 2.625 / d) * p + 0.984375;
+  };
+  const rand = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+
+  // 区間の頭（in）と終わり（out）の進み具合
+  function phase(T, local, dur) {
+    const t = Math.min(T, dur / 2);
+    const pin = t > 0 ? clamp01(local / t) : 1;
+    const pout = t > 0 ? clamp01((dur - local) / t) : 1;
+    if (pin < 1) return { dir: 'in', q: pin };
+    if (pout < 1) return { dir: 'out', q: pout };
+    return { dir: 'still', q: 1 };
+  }
+
+  // 下書き用のキャンバス（画面と同じ大きさ）
+  const layers = new Map();
+  function layerFor(ctx, W, H) {
+    let l = layers.get(ctx);
+    if (!l || l.width !== W || l.height !== H) { l = new OffscreenCanvas(W, H); layers.set(ctx, l); }
+    const lc = l.getContext('2d');
+    lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalAlpha = 1; lc.filter = 'none';
+    lc.clearRect(0, 0, W, H);
+    return l;
+  }
+
+  // 下書き（layer）を、切り替え方 kind で画面に重ねる
+  function composite(ctx, layer, kind, ph, W, H, seed) {
+    const { dir, q } = ph;
+    const e = easeOut(q);
+    const inn = dir === 'in';
+    const base = Math.min(W, H);
+    ctx.save();
+    const plain = () => ctx.drawImage(layer, 0, 0);
+    const xf = (tx, ty, sc, rot = 0) => {
+      ctx.translate(W / 2 + tx, H / 2 + ty); ctx.rotate(rot); ctx.scale(sc, sc); ctx.translate(-W / 2, -H / 2);
+    };
+    if (dir === 'still' || kind === 'cut') { plain(); ctx.restore(); return; }
+    switch (kind) {
+      case 'fade': ctx.globalAlpha = q; plain(); break;
+      case 'slide': xf((inn ? 1 : -1) * W * (1 - e), 0, 1); plain(); break;
+      case 'slideUp': xf(0, (inn ? 1 : -1) * H * (1 - e), 1); plain(); break;
+      case 'zoom':
+        ctx.globalAlpha = q;
+        xf(0, 0, inn ? 1.3 - 0.3 * e : 1 + 0.15 * (1 - q)); plain(); break;
+      case 'wipe': {
+        const edge = W * easeInOut(q);
+        ctx.beginPath();
+        if (inn) ctx.rect(0, 0, edge, H); else ctx.rect(W - edge, 0, edge, H);
+        ctx.clip(); plain(); break;
+      }
+      case 'circle': {
+        ctx.beginPath(); ctx.arc(W / 2, H / 2, (Math.hypot(W, H) / 2) * easeInOut(q), 0, Math.PI * 2);
+        ctx.clip(); plain(); break;
+      }
+      case 'blinds': {
+        const n = 8, bw = W / n, k = easeInOut(q);
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) ctx.rect(i * bw + (bw * (1 - k)) / 2, 0, bw * k, H);
+        ctx.clip(); plain(); break;
+      }
+      case 'blur':
+        ctx.globalAlpha = clamp01(q * 1.4);
+        ctx.filter = `blur(${((1 - q) * base * 0.035).toFixed(1)}px)`;
+        xf(0, 0, 1 + 0.04 * (1 - q)); plain(); break;
+      case 'flash':
+        plain();
+        ctx.globalAlpha = (1 - q) * 0.95; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H); break;
+      case 'spin':
+        ctx.globalAlpha = q;
+        xf(0, 0, 0.55 + 0.45 * e, (inn ? -1 : 1) * 0.6 * (1 - e)); plain(); break;
+      case 'glitch': {
+        // 横に細く切って、ずらしながら重ねる
+        const amp = (1 - q) * W * 0.09, rows = 14, rh = H / rows;
+        ctx.globalAlpha = clamp01(q * 1.6);
+        for (let i = 0; i < rows; i++) {
+          const off = (rand(seed * 31 + i) - 0.5) * 2 * amp * (rand(seed + i * 7) > 0.4 ? 1 : 0.15);
+          ctx.drawImage(layer, 0, i * rh, W, rh, off, i * rh, W, rh);
+        }
+        if (q < 0.8) {
+          ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = (0.8 - q) * 0.5;
+          ctx.drawImage(layer, amp * 0.3, 0); ctx.globalCompositeOperation = 'source-over';
+        }
+        break;
+      }
+      case 'rise': ctx.globalAlpha = q; xf(0, (inn ? 1 : -0.6) * H * 0.025 * (1 - e), 1); plain(); break;
+      case 'drop':
+        ctx.globalAlpha = clamp01(q * 2);
+        xf(0, inn ? -H * 0.06 * (1 - easeOutBounce(q)) : 0, 1);
+        if (!inn) ctx.globalAlpha = q;
+        plain(); break;
+      case 'pop':
+        ctx.globalAlpha = inn ? clamp01(q * 2) : q;
+        xf(0, 0, inn ? 0.6 + 0.4 * easeOutBack(q) : 0.9 + 0.1 * q); plain(); break;
+      case 'slam':
+        ctx.globalAlpha = q;
+        xf(0, 0, inn ? 1.7 - 0.7 * e : 1); plain(); break;
+      case 'tracking':
+      case 'typewriter':
+        ctx.globalAlpha = inn && kind === 'typewriter' ? 1 : q; plain(); break;
+      default: ctx.globalAlpha = q; plain();
+    }
+    ctx.restore();
+  }
+
+  function drawCover(ctx, src, sw, sh, W, H, zoom) {
+    const s = Math.max(W / sw, H / sh) * zoom;
+    const dw = sw * s, dh = sh * s;
+    ctx.drawImage(src, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  }
+  // 改行を守りつつ、幅に収まらない行は単語の切れ目（日本語なら文字単位）で折り返す
+  function wrapText(ctx, text, maxW) {
+    const out = [];
+    for (const para of String(text).split('\n')) {
+      const p = para.trim();
+      if (!p) continue;
+      const parts = /\s/.test(p) ? p.split(/(\s+)/) : [...p];
+      let line = '';
+      for (const w of parts) {
+        const test = line + w;
+        if (line.trim() && ctx.measureText(test.trim()).width > maxW) { out.push(line.trim()); line = w.trimStart(); }
+        else line = test;
+      }
+      if (line.trim()) out.push(line.trim());
+    }
+    return out;
+  }
+  function setSpacing(ctx, px) { if ('letterSpacing' in ctx) ctx.letterSpacing = px + 'px'; }
+
+  // anim.reveal: 表示する文字の割合（タイプライター）、anim.spacingAdd: 字間の追加（字間が広がる）
+  function drawLines(ctx, W, H, lines, sub, fg, y0Shift = 0, anim = {}) {
+    const sty = look();
+    const base = Math.min(W, H);
+    const family = FONTS[S.font];
+    const spacing = sty.spacing + (anim.spacingAdd || 0);
+    let fs = base * 0.065 * sty.size;
+    const measure = () => {
+      ctx.font = `${sty.weight} ${fs}px ${family}`; setSpacing(ctx, fs * spacing);
+      return lines.map((l) => ctx.measureText(l).width);
+    };
+    let widths = measure();
+    const maxW = W * (sty.marker ? 0.78 : 0.84);
+    const wMax = Math.max(0, ...widths);
+    if (wMax > maxW) { fs *= maxW / wMax; widths = measure(); }
+    const lh = fs * (sty.marker ? 1.9 : 1.7);
+    const subFs = base * 0.028;
+    let subLines = [];
+    if (sub) {
+      ctx.font = `500 ${subFs}px ${family}`; setSpacing(ctx, subFs * Math.max(0.08, spacing * 0.6));
+      subLines = wrapText(ctx, sub, W * 0.84);
+      ctx.font = `${sty.weight} ${fs}px ${family}`; setSpacing(ctx, fs * spacing);
+    }
+    const subLh = subFs * 1.6;
+    const gap = subLines.length ? base * 0.03 : 0;
+    const blockH = lines.length * lh + (subLines.length ? gap + subLh * subLines.length : 0);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    let y = H / 2 - blockH / 2 + lh / 2 + y0Shift;
+    const total = lines.reduce((a, l) => a + [...l].length, 0);
+    let left = anim.reveal == null ? Infinity : Math.floor(total * anim.reveal);
+    lines.forEach((l, i) => {
+      const chars = [...l];
+      const shown = chars.slice(0, Math.max(0, Math.min(chars.length, left))).join('');
+      left -= chars.length;
+      // 行の位置は全文の幅で決め、途中まで表示でも動かないようにする
+      const x0 = (W - widths[i]) / 2 + (fs * spacing) / 2;
+      if (sty.marker && shown) {
+        // 黄色のマーカーの上に濃い文字
+        const w = ctx.measureText(shown).width + fs * 0.7, h = fs * 1.35, r = fs * 0.2;
+        ctx.fillStyle = '#ffd84a';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x0 - fs * 0.35 - (fs * spacing) / 2, y - h / 2, w, h, r); else ctx.rect(x0 - fs * 0.35, y - h / 2, w, h);
+        ctx.fill();
+        ctx.fillStyle = '#1b1b1b';
+      } else ctx.fillStyle = fg;
+      if (shown) ctx.fillText(shown, x0, y);
+      // タイプライターのカーソル
+      if (anim.reveal != null && anim.reveal < 1 && left < 0 && left > -chars.length - 1 && shown.length < chars.length) {
+        const cw = ctx.measureText(shown).width;
+        ctx.fillRect(x0 + cw, y - fs * 0.55, Math.max(2, fs * 0.06), fs * 1.1);
+      }
+      y += lh;
+    });
+    if (subLines.length && (anim.reveal == null || anim.reveal >= 1)) {
+      ctx.fillStyle = fg; ctx.textAlign = 'center';
+      ctx.font = `500 ${subFs}px ${family}`; setSpacing(ctx, subFs * Math.max(0.08, spacing * 0.6));
+      ctx.globalAlpha *= 0.85;
+      let sy = y - lh / 2 + gap + subLh / 2;
+      subLines.forEach((l) => { ctx.fillText(l, W / 2, sy); sy += subLh; });
+    }
+    setSpacing(ctx, 0);
+  }
+
+  function drawSeg(ctx, W, H, seg, local) {
+    const { bg, fg } = colors();
+    const sty = look();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.filter = 'none';
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    if (!seg) { ctx.restore(); return; }
+    const layer = layerFor(ctx, W, H);
+    const lc = layer.getContext('2d');
+    const seed = Math.floor((seg.start + local) * FPS);
+    if (seg.type === 'cut') {
+      const c = seg.cut;
+      if (c.kind === 'image') drawCover(lc, c.src, c.w, c.h, W, H, 1 + sty.zoom * (local / seg.dur));
+      else if (c.src.readyState >= 2) drawCover(lc, c.src, c.w, c.h, W, H, 1 + sty.zoom * 0.5 * (local / seg.dur));
+      composite(ctx, layer, sty.cut, phase(sty.cutT, local, seg.dur), W, H, seed);
+      if (sty.letterbox) {
+        // シネマ：上下の黒帯（横は2.35:1、縦は上下12%）
+        const bar = W > H ? Math.max(0, (H - W / 2.35) / 2) : H * 0.12;
+        ctx.globalAlpha = 1; ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, W, bar); ctx.fillRect(0, H - bar, W, bar);
+      }
+    } else {
+      const ph = phase(sty.textT, local, seg.dur);
+      const anim = {};
+      if (sty.text === 'typewriter') {
+        // 1文字0.07秒、ただし区間の半分までに打ち終える
+        const chars = seg.type === 'text' ? seg.lines.join('').length : [...tagline.trim()].length;
+        anim.reveal = clamp01(local / Math.min(seg.dur * 0.5, Math.max(0.3, chars * 0.07)));
+      }
+      if (sty.text === 'tracking') anim.spacingAdd = -0.04 + 0.22 * easeOut(clamp01(local / seg.dur));
+      if (seg.type === 'text') {
+        drawLines(lc, W, H, seg.lines, seg.sub, fg, 0, anim);
+      } else {
+        const hasTag = tagline.trim();
+        if (logo) {
+          const bw = W * 0.6, bh = H * (hasTag ? 0.22 : 0.3);
+          const s = Math.min(bw / logo.bitmap.width, bh / logo.bitmap.height);
+          const dw = logo.bitmap.width * s, dh = logo.bitmap.height * s;
+          const cy = hasTag ? H / 2 - dh * 0.35 : H / 2;
+          lc.drawImage(logo.bitmap, (W - dw) / 2, cy - dh / 2, dw, dh);
+          if (hasTag) drawLines(lc, W, H, [tagline.trim()], '', fg, dh * 0.45 + Math.min(W, H) * 0.06, anim);
+        } else if (hasTag) {
+          drawLines(lc, W, H, [tagline.trim()], '', fg, 0, anim);
+        }
+      }
+      composite(ctx, layer, sty.text, ph, W, H, seed);
+    }
+    ctx.restore();
+  }
+
+  // ---- プレビュー ----
+  const pv = $('preview');
+  const pctx = pv.getContext('2d');
+  function sizePreview() {
+    const { W, H } = dims(S.aspect === '9:16' ? 0.4 : 0.36);
+    if (pv.width !== W || pv.height !== H) { pv.width = W; pv.height = H; }
+  }
+  function syncVideos(seg, local, wantPlay) {
+    cuts.forEach((c) => {
+      if (c.kind !== 'video') return;
+      const active = seg && seg.type === 'cut' && seg.cut === c;
+      if (!active) { if (!c.src.paused) c.src.pause(); return; }
+      if (Math.abs(c.src.currentTime - local) > 0.25) c.src.currentTime = Math.min(local, c.duration - 0.05);
+      if (wantPlay && c.src.paused) c.src.play().catch(() => {});
+      if (!wantPlay && !c.src.paused) c.src.pause();
+    });
+  }
+  function drawPreview() {
+    sizePreview();
+    const seg = segAt(curT);
+    const local = seg ? curT - seg.start : 0;
+    syncVideos(seg, local, playing);
+    drawSeg(pctx, pv.width, pv.height, seg, local);
+    $('tc').textContent = `${fmt(curT)} / ${fmt(timeline.total)}`;
+    if (!seekDragging) $('seek').value = timeline.total ? Math.round((curT / timeline.total) * 1000) : 0;
+  }
+  const fmt = (t) => {
+    const m = Math.floor(t / 60), s = t - m * 60;
+    return `${String(m).padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
+  };
+  function tick(now) {
+    if (!playing) return;
+    curT = playFrom + (now - playClock) / 1000;
+    if (curT >= timeline.total) { curT = timeline.total; stop(); drawPreview(); return; }
+    drawPreview();
+    requestAnimationFrame(tick);
+  }
+  function play() {
+    if (!timeline.total || exporting) return;
+    if (curT >= timeline.total - 0.05) curT = 0;
+    playing = true; playFrom = curT; playClock = performance.now();
+    $('playBtn').textContent = '❚❚ 停止'; $('playBtn').setAttribute('aria-label', '停止');
+    startBgm();
+    requestAnimationFrame(tick);
+  }
+  function stop() {
+    playing = false;
+    $('playBtn').textContent = '▶ 再生'; $('playBtn').setAttribute('aria-label', '再生');
+    stopBgm();
+    cuts.forEach((c) => c.kind === 'video' && c.src.pause());
+  }
+  $('playBtn').onclick = () => (playing ? stop() : play());
+  let seekDragging = false;
+  $('seek').addEventListener('input', () => {
+    seekDragging = true;
+    if (playing) stop();
+    curT = (Number($('seek').value) / 1000) * timeline.total;
+    drawPreview();
+  });
+  $('seek').addEventListener('change', () => { seekDragging = false; });
+
+  function renderStrip() {
+    const strip = $('strip');
+    strip.innerHTML = '';
+    timeline.segs.forEach((s) => {
+      const d = document.createElement('div');
+      d.className = 's-' + s.type;
+      d.style.flex = String(s.dur);
+      d.title = (s.type === 'cut' ? `カット${s.idx + 1}` : s.type === 'text' ? (s.blank ? '白紙画面' : `メッセージ「${s.lines.join(' ')}」`) : '最後の画面') + `  ${s.dur.toFixed(1)}秒`;
+      d.textContent = s.type === 'cut' ? String(s.idx + 1).padStart(2, '0') : s.type === 'text' ? (s.blank ? '' : 'Aa') : 'END';
+      if (s.blank) d.className += ' s-blank';
+      d.onclick = () => { if (playing) stop(); curT = s.start + 0.01; drawPreview(); };
+      strip.appendChild(d);
+    });
+  }
+
+  // ---- 素材 ----
+  // 拡張子でも判定する（環境によってファイルの種類が空で渡されるため）
+  const VIDEO_EXT = ['mp4', 'mov', 'm4v', 'webm', 'mkv', '3gp'];
+  const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif'];
+  const extOf = (f) => (f.name.split('.').pop() || '').toLowerCase();
+  const isVideoFile = (f) => f.type.startsWith('video/') || VIDEO_EXT.includes(extOf(f));
+  const isImageFile = (f) => f.type.startsWith('image/') || IMAGE_EXT.includes(extOf(f));
+
+  async function loadMedia(file) {
+    if (isImageFile(file)) {
+      try {
+        const bmp = await createImageBitmap(file);
+        return { kind: 'image', src: bmp, w: bmp.width, h: bmp.height, duration: Infinity };
+      } catch (e) {
+        throw new Error(['heic', 'heif'].includes(extOf(file)) ? 'heic' : 'image');
+      }
+    }
+    if (isVideoFile(file)) {
+      const v = document.createElement('video');
+      v.muted = true; v.playsInline = true; v.preload = 'auto';
+      const url = URL.createObjectURL(file);
+      v.src = url;
+      try {
+        await new Promise((res, rej) => {
+          const to = setTimeout(() => rej(new Error('timeout')), 20000);
+          v.onloadeddata = () => { clearTimeout(to); res(); };
+          v.onerror = () => { clearTimeout(to); rej(new Error('decode')); };
+        });
+      } catch (e) { URL.revokeObjectURL(url); throw e; }
+      // 音だけ再生できて映像が出ない（HEVCなど）場合も失敗として扱う
+      if (!v.videoWidth || !v.videoHeight) { URL.revokeObjectURL(url); throw new Error('decode'); }
+      return { kind: 'video', src: v, w: v.videoWidth, h: v.videoHeight, duration: v.duration };
+    }
+    return null;
+  }
+  function loadErrorText(names, reasons) {
+    const list = names.map((n) => `「${n}」`).join('');
+    if (reasons.includes('heic')) {
+      return `${list}を読み込めませんでした。iPhoneの写真（HEIC形式）はブラウザで開けないことがあります。JPGで保存し直すか、iPhoneの「設定 > カメラ > フォーマット」を「互換性優先」にして撮影してください`;
+    }
+    if (reasons.includes('decode') || reasons.includes('timeout')) {
+      return `${list}を読み込めませんでした。iPhoneなどで撮った動画（HEVC形式）は、パソコンによってはブラウザで再生できません。MP4（H.264）に変換するか、iPhoneの「設定 > カメラ > フォーマット」を「互換性優先」にして撮影してください`;
+    }
+    return `${list}を読み込めませんでした。JPG・PNG・MP4で試してください`;
+  }
+  function showLoadErr(msg) { $('loadErrText').textContent = msg; $('loadErr').hidden = !msg; }
+  $('loadErrClose').onclick = () => showLoadErr('');
+  async function addFiles(files) {
+    const all = [...files];
+    const list = all.filter((f) => isVideoFile(f) || isImageFile(f))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }));
+    if (!list.length) { showLoadErr('写真か動画のファイルを選んでください（JPG・PNG・MP4・MOVなど）'); return; }
+    showLoadErr('');
+    if (cuts.length && cuts.every((c) => c.sample)) cuts = [];
+    setStatus(`${list.length}件を読み込んでいます…`);
+    const failed = [], reasons = [];
+    for (const f of list) {
+      try {
+        const m = await loadMedia(f);
+        if (m) cuts.push({ id: ++uid, name: f.name, msg: '', sub: '', subAuto: true, sample: false, ...m });
+      } catch (e) {
+        failed.push(f.name); reasons.push(e && e.message);
+      }
+    }
+    setStatus('');
+    if (failed.length) showLoadErr(loadErrorText(failed, reasons));
+    refresh();
+  }
+  $('fileIn').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+  $('addIn').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+  const drop = $('drop');
+  ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
+  $('clearAll').onclick = () => { stop(); cuts = []; curT = 0; refresh(); };
+
+  $('logoIn').onchange = async (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    try { logo = { bitmap: await createImageBitmap(f), url: URL.createObjectURL(f) }; } catch (err) { setStatus('ロゴ画像を読み込めませんでした', true); }
+    refresh();
+  };
+  $('logoClear').onclick = () => { logo = null; refresh(); };
+  $('tagline').oninput = (e) => { tagline = e.target.value; rebuild(); };
+  $('bgmIn').onchange = (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    stop(); bgmFile = f; bgmMode = 'file'; fileVersion++; saveBgm(); refresh();
+  };
+
+  // ---- 一覧の表示 ----
+  function thumbCanvas(c) {
+    const cv = document.createElement('canvas'); cv.width = 192; cv.height = 120;
+    const x = cv.getContext('2d');
+    const paint = () => drawCover(x, c.src, c.w, c.h, 192, 120, 1);
+    if (c.kind === 'video') {
+      const v = c.src;
+      if (v.readyState >= 2) paint();
+      v.addEventListener('seeked', function once() { paint(); v.removeEventListener('seeked', once); });
+      if (v.currentTime === 0) v.currentTime = Math.min(0.5, c.duration / 2);
+    } else paint();
+    return cv;
+  }
+  function renderCuts() {
+    const ol = $('cuts');
+    ol.innerHTML = '';
+    $('emptyNote').hidden = cuts.length > 0;
+    $('cutCount').textContent = cuts.length ? String(cuts.length) : '';
+    cuts.forEach((c, i) => {
+      const li = document.createElement('li'); li.className = 'cut';
+      const no = document.createElement('div'); no.className = 'no'; no.textContent = String(i + 1).padStart(2, '0');
+      const th = document.createElement('div'); th.className = 'thumb'; th.appendChild(thumbCanvas(c));
+      const badge = document.createElement('span'); badge.className = 'badge';
+      badge.textContent = c.sample ? 'サンプル' : c.kind === 'video' ? `動画 ${c.duration.toFixed(1)}秒` : '写真';
+      th.appendChild(badge);
+      const fields = document.createElement('div'); fields.className = 'fields';
+      const nm = document.createElement('div'); nm.className = 'fname'; nm.textContent = c.name;
+      const ta = document.createElement('textarea'); ta.id = 'msg-' + c.id; ta.rows = 2; ta.value = c.msg;
+      ta.placeholder = 'このカットの後に出すメッセージ（改行もそのまま反映）';
+      ta.setAttribute('aria-label', `カット${i + 1}の後のメッセージ`);
+      ta.oninput = () => { c.msg = ta.value; rebuild(); };
+      // 日本語を書き終えたら（欄から離れたら）英訳する。英語を自分で直した後は上書きしない
+      ta.onchange = () => {
+        if (!c.subAuto) return;
+        if (!c.msg.trim()) { c.trToken = (c.trToken || 0) + 1; setSub(c, ''); return; }
+        translate(c);
+      };
+      const subrow = document.createElement('div'); subrow.className = 'subrow';
+      const sub = document.createElement('textarea'); sub.className = 'sub'; sub.id = 'sub-' + c.id; sub.value = c.sub; sub.rows = 1;
+      sub.placeholder = trReady ? '英訳がここに自動で入ります（Enterで改行）' : '下に小さく出す文（英訳など・Enterで改行）';
+      const fitH = () => { sub.style.height = 'auto'; sub.style.height = sub.scrollHeight + 2 + 'px'; };
+      requestAnimationFrame(fitH);
+      sub.setAttribute('aria-label', `カット${i + 1}の小さい一行`);
+      sub.oninput = () => {
+        fitH();
+        c.sub = sub.value; c.subAuto = !sub.value.trim();
+        c.trToken = (c.trToken || 0) + 1;
+        if (c.busy) setBusy(c, false);
+        rebuild();
+      };
+      subrow.appendChild(sub);
+      if (trReady) {
+        const tb = document.createElement('button'); tb.type = 'button'; tb.className = 'ghost'; tb.id = 'tr-' + c.id;
+        tb.textContent = c.busy ? '英訳中…' : '英訳'; tb.disabled = !!c.busy;
+        tb.setAttribute('aria-label', `カット${i + 1}のメッセージを英訳し直す`);
+        tb.onclick = () => { if (c.msg.trim()) { c.subAuto = true; translate(c); } };
+        subrow.appendChild(tb);
+      }
+      fields.append(nm, ta, subrow);
+      const ops = document.createElement('div'); ops.className = 'ops';
+      const mk = (label, aria, fn, disabled) => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost'; b.textContent = label;
+        b.setAttribute('aria-label', aria); b.disabled = !!disabled; b.onclick = fn; return b;
+      };
+      ops.append(
+        mk('↑', `カット${i + 1}を上へ`, () => { [cuts[i - 1], cuts[i]] = [cuts[i], cuts[i - 1]]; refresh(); }, i === 0),
+        mk('↓', `カット${i + 1}を下へ`, () => { [cuts[i + 1], cuts[i]] = [cuts[i], cuts[i + 1]]; refresh(); }, i === cuts.length - 1),
+        mk('×', `カット${i + 1}を削除`, () => { cuts.splice(i, 1); refresh(); }),
+      );
+      li.append(no, th, fields, ops);
+      ol.appendChild(li);
+    });
+    const lt = $('logoThumb');
+    lt.innerHTML = '';
+    if (logo) { const im = document.createElement('img'); im.src = logo.url; im.alt = 'ロゴ'; lt.appendChild(im); }
+    else lt.textContent = 'ロゴなし';
+    $('logoClear').hidden = !logo;
+    renderBgmUI();
+  }
+  function renderSettings() {
+    document.querySelectorAll('.seg[data-key]').forEach((g) => {
+      g.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(S[g.dataset.key] === b.dataset.v)));
+    });
+    $('cutSec').value = S.cutSec; $('textSec').value = S.textSec;
+    $('trSec').value = S.trSec ?? '';
+    $('trSec').placeholder = `おすすめ${st().cut === 'cut' ? st().textT : st().cutT}`;
+    $('cutSec').disabled = S.target > 0;
+    document.querySelectorAll('#styles button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.s === S.style)));
+    $('styleDesc').textContent = st().desc + '。';
+    const fill = (sel, table, def, cur) => {
+      sel.innerHTML = '';
+      const o = document.createElement('option'); o.value = ''; o.textContent = `スタイルのおすすめ（${table[def].name}）`; sel.appendChild(o);
+      Object.entries(table).forEach(([k, v]) => { const op = document.createElement('option'); op.value = k; op.textContent = v.name; sel.appendChild(op); });
+      sel.value = table[cur] ? cur : '';
+    };
+    fill($('cutTr'), CUT_TR, st().cut, S.cutTr);
+    fill($('textTr'), TEXT_TR, st().text, S.textTr);
+    const m = Math.floor(S.target / 60);
+    $('durMin').value = m; $('durSec').value = (S.target - m * 60).toFixed(1);
+    let preset = false;
+    document.querySelectorAll('.sw').forEach((b) => {
+      const on = b.dataset.c.toLowerCase() === S.bg.toLowerCase();
+      if (on) preset = true;
+      b.setAttribute('aria-pressed', String(on));
+    });
+    $('bgColor').value = S.bg;
+    $('bgColor').parentElement.classList.toggle('on', !preset);
+    $('bgHex').textContent = S.bg.toUpperCase();
+  }
+  document.querySelectorAll('#styles button').forEach((b) => (b.onclick = () => {
+    S.style = b.dataset.s; S.font = st().font; S.cutTr = ''; S.textTr = ''; S.trSec = null; saveSettings(); renderSettings();
+    renderBgmUI();
+    if (playing && bgmMode === 'auto' && !musicKind) { stop(); play(); }
+    ensureFonts().then(() => { if (!playing) drawPreview(); });
+    rebuild();
+  }));
+  $('cutTr').onchange = (e) => { S.cutTr = e.target.value; saveSettings(); rebuild(); };
+  $('textTr').onchange = (e) => { S.textTr = e.target.value; saveSettings(); rebuild(); };
+  const setBg = (c) => { S.bg = c; saveSettings(); renderSettings(); rebuild(); };
+  document.querySelectorAll('.sw').forEach((b) => (b.onclick = () => setBg(b.dataset.c)));
+  $('bgColor').addEventListener('input', (e) => setBg(e.target.value));
+  const readDuration = () => {
+    let m = Math.floor(Number($('durMin').value) || 0);
+    let s = Number($('durSec').value) || 0;
+    m = Math.min(10, Math.max(0, m));
+    s = Math.min(59.9, Math.max(0, Math.round(s * 10) / 10));
+    S.target = Math.round((m * 60 + s) * 10) / 10;
+    saveSettings(); renderSettings(); rebuild();
+  };
+  // 入力中もその場で反映（表示の整形は欄を離れたとき）
+  const previewDuration = () => {
+    const m = Math.min(10, Math.max(0, Math.floor(Number($('durMin').value) || 0)));
+    const sec = Math.min(59.9, Math.max(0, Number($('durSec').value) || 0));
+    S.target = Math.round((m * 60 + sec) * 10) / 10;
+    $('cutSec').disabled = S.target > 0;
+    rebuild(); if (!playing) drawPreview();
+  };
+  $('durMin').addEventListener('input', previewDuration);
+  $('durSec').addEventListener('input', previewDuration);
+  $('durMin').onchange = readDuration;
+  $('durSec').onchange = readDuration;
+  document.querySelectorAll('.seg[data-key]').forEach((g) => g.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    S[g.dataset.key] = b.dataset.v; saveSettings(); renderSettings();
+    if (g.dataset.key === 'font') ensureFonts().then(drawPreview);
+    rebuild();
+  }));
+  // 数字を変えたらその場でプレビューに反映する（入力中も反映、欄を離れたら表示を整える）
+  const num = (el, key, lo, hi, allowEmpty) => {
+    const apply = (final) => {
+      if (allowEmpty && el.value.trim() === '') { S[key] = null; }
+      else {
+        const v = Number(el.value);
+        if (el.value.trim() === '' || !Number.isFinite(v)) { if (final) el.value = S[key] ?? ''; return; }
+        S[key] = Math.round(Math.min(hi, Math.max(lo, v)) * 10) / 10;
+      }
+      if (final) el.value = S[key] ?? '';
+      saveSettings(); rebuild();
+      if (!playing) drawPreview();
+    };
+    el.addEventListener('input', () => apply(false));
+    el.addEventListener('change', () => apply(true));
+  };
+  num($('cutSec'), 'cutSec', 0.5, 15); num($('textSec'), 'textSec', 0, 10); num($('trSec'), 'trSec', 0, 3, true);
+
+  function rebuild() {
+    buildTimeline();
+    curT = Math.min(curT, timeline.total);
+    renderStrip();
+    $('exportBtn').disabled = !timeline.total || exporting;
+    if (!playing) drawPreview();
+  }
+  function refresh() { renderCuts(); rebuild(); }
+
+  // ---- 英訳（Chrome に内蔵の翻訳。パソコンの中だけで動き、アカウント不要） ----
+  let trReady = false;      // この環境で翻訳が使えるか
+  let translatorP = null;   // 作成中／作成済みの翻訳器
+  function setSub(c, text) {
+    c.sub = text;
+    const el = document.getElementById('sub-' + c.id);
+    if (el) { el.value = text; el.style.height = 'auto'; el.style.height = el.scrollHeight + 2 + 'px'; }
+    rebuild();
+  }
+  function setBusy(c, busy) {
+    c.busy = busy;
+    const b = document.getElementById('tr-' + c.id);
+    if (b) { b.textContent = busy ? '英訳中…' : '英訳'; b.disabled = busy; }
+  }
+  function getTranslator() {
+    if (!translatorP) {
+      translatorP = self.Translator.create({
+        sourceLanguage: 'ja', targetLanguage: 'en',
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            const pct = Math.round((e.loaded || 0) * 100);
+            setStatus(pct < 100 ? `翻訳機能を準備しています… ${pct}%（初回のみ）` : '');
+          });
+        },
+      }).catch((e) => { translatorP = null; throw e; });
+    }
+    return translatorP;
+  }
+  async function translate(c) {
+    if (!trReady) return;
+    const src = c.msg.trim();
+    if (!src) return;
+    const token = (c.trToken = (c.trToken || 0) + 1);
+    setBusy(c, true);
+    try {
+      const tr = await getTranslator();
+      // 改行は日本語として続けて読ませる
+      let en = await tr.translate(src.split('\n').map((l) => l.trim()).join(''));
+      if (token !== c.trToken || c.msg.trim() !== src || !c.subAuto) return;
+      en = en.trim().replace(/^["“'「]+|["”'」]+$/g, '').replace(/\.$/, '');
+      setSub(c, en);
+      if (/準備/.test($('status').textContent)) setStatus('');
+    } catch (e) {
+      if (e && e.name === 'NotAllowedError') {
+        setStatus('初回は「英訳」ボタンを押して翻訳機能を準備してください');
+      } else {
+        setStatus('英訳できませんでした。英語は直接入力してください', true);
+      }
+    } finally {
+      if (token === c.trToken) setBusy(c, false);
+    }
+  }
+  (async () => {
+    try {
+      if ('Translator' in self) {
+        const a = await self.Translator.availability({ sourceLanguage: 'ja', targetLanguage: 'en' });
+        trReady = a !== 'unavailable';
+      }
+    } catch (e) { trReady = false; }
+    if (trReady) renderCuts();
+  })();
+
+  // ---- 文字の読み込み ----
+  function allText() {
+    return cuts.map((c) => c.msg + c.sub).join('') + tagline + 'あいうえおABC';
+  }
+  async function ensureFonts() {
+    try { await document.fonts.load(`500 64px ${FONTS[S.font]}`, allText()); } catch (e) {}
+  }
+
+  // ---- 書き出し ----
+  function setStatus(msg, err) { const s = $('status'); s.textContent = msg; s.classList.toggle('err', !!err); }
+  function seekVideo(v, t) {
+    return new Promise((res) => {
+      const target = Math.max(0, Math.min(t, v.duration - 0.03));
+      if (Math.abs(v.currentTime - target) < 0.001 && v.readyState >= 2) return res();
+      const done = () => { v.removeEventListener('seeked', done); res(); };
+      v.addEventListener('seeked', done);
+      v.currentTime = target;
+    });
+  }
+  async function pickVideoCodec(W, H) {
+    const cands = [
+      { codec: 'avc1.640028', box: 'mp4' },
+      { codec: 'avc1.4d0028', box: 'mp4' },
+      { codec: 'avc1.42002a', box: 'mp4' },
+      { codec: 'vp09.00.40.08', box: 'webm' },
+      { codec: 'vp8', box: 'webm' },
+    ];
+    for (const c of cands) {
+      const cfg = { codec: c.codec, width: W, height: H, bitrate: 10_000_000, framerate: FPS };
+      if (c.box === 'mp4') cfg.avc = { format: 'avc' };
+      try { if ((await VideoEncoder.isConfigSupported(cfg)).supported) return { ...c, cfg }; } catch (e) {}
+    }
+    return null;
+  }
+  async function pickAudioCodec(box) {
+    const list = box === 'mp4' ? [['mp4a.40.2', 'aac'], ['opus', 'opus']] : [['opus', 'A_OPUS']];
+    for (const [codec, mux] of list) {
+      const cfg = { codec, sampleRate: 48000, numberOfChannels: 2, bitrate: 160_000 };
+      try { if ((await AudioEncoder.isConfigSupported(cfg)).supported) return { cfg, mux }; } catch (e) {}
+    }
+    return null;
+  }
+  async function renderBgm(T) {
+    const sr = 48000;
+    const oac = new OfflineAudioContext(2, Math.ceil(T * sr), sr);
+    const buf = await oac.decodeAudioData(await bgmFile.arrayBuffer());
+    const src = oac.createBufferSource(); src.buffer = buf; src.loop = true;
+    const g = oac.createGain();
+    g.gain.setValueAtTime(0, 0); g.gain.linearRampToValueAtTime(1, Math.min(1, T / 2));
+    g.gain.setValueAtTime(1, Math.max(Math.min(1, T / 2), T - 2)); g.gain.linearRampToValueAtTime(0, T);
+    src.connect(g).connect(oac.destination); src.start(0);
+    return oac.startRendering();
+  }
+
+
+  // ================= BGM の自動作曲（ブラウザの音源だけで作る。AI は使わない） =================
+  const MUSIC = {
+    piano: { name: 'ピアノ（静か）', bpm: 72 },
+    pop: { name: 'ポップ（明るい）', bpm: 112 },
+    strings: { name: 'シネマ（弦楽器風）', bpm: 70 },
+    beat: { name: 'ダイナミック（ビート）', bpm: 124 },
+    synth: { name: 'テック（電子音）', bpm: 116 },
+    bells: { name: 'エレガント（ベル）', bpm: 64 },
+    musicbox: { name: 'フィルム（オルゴール）', bpm: 84 },
+  };
+  const STYLE_MUSIC = { doc: 'piano', simple: 'pop', pop: 'pop', cinema: 'strings', dynamic: 'beat', elegant: 'bells', tech: 'synth', film: 'musicbox' };
+  const currentKind = () => (MUSIC[musicKind] ? musicKind : STYLE_MUSIC[S.style] || 'piano');
+
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => { a = (a + 0x6d2b79f5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  const hz = (m) => 440 * 2 ** ((m - 69) / 12);
+
+  async function makeMusic(kind, seed, T) {
+    const sr = 48000;
+    const ctx = new OfflineAudioContext(2, Math.ceil(T * sr), sr);
+    const R = rng(seed * 9973 + kind.length * 131);
+    const pick = (arr) => arr[Math.floor(R() * arr.length)];
+    const bpm = MUSIC[kind].bpm, beat = 60 / bpm, bar = beat * 4;
+    const nBars = Math.ceil(T / bar) + 1;
+
+    // 調と和音進行（数字は主音からの半音数）
+    const key = pick([0, 2, 5, 7, -3]) + 60;
+    const prog = pick([[0, 7, 9, 5], [9, 5, 0, 7], [0, 9, 5, 7], [5, 7, 4, 9], [0, 5, 9, 7], [9, 7, 5, 7]]);
+    const minor = { 2: 1, 4: 1, 9: 1 };
+    const chordAt = (b, seventh) => {
+      const d = prog[b % prog.length];
+      const r = key + d - 12;
+      const third = minor[d] ? 3 : 4;
+      const tones = [r, r + third, r + 7];
+      if (seventh) tones.push(r + (minor[d] ? 10 : 11));
+      return tones;
+    };
+    const penta = [0, 2, 4, 7, 9].map((x) => x + key);
+
+    // 全体の音量（頭0.4秒で入り、最後2.2秒で消える）と軽いコンプレッサー
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0, 0);
+    master.gain.linearRampToValueAtTime(0.85, Math.min(0.4, T / 3));
+    master.gain.setValueAtTime(0.85, Math.max(Math.min(0.4, T / 3), T - 2.2));
+    master.gain.linearRampToValueAtTime(0, T);
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -16; comp.ratio.value = 4; comp.attack.value = 0.01; comp.release.value = 0.2;
+    master.connect(comp).connect(ctx.destination);
+
+    // 残響
+    const rev = ctx.createConvolver();
+    const ir = ctx.createBuffer(2, Math.floor(sr * 2.6), sr);
+    for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] = (R() * 2 - 1) * (1 - i / d.length) ** 3.2; }
+    rev.buffer = ir;
+    const revOut = ctx.createGain(); revOut.gain.value = 0.55; rev.connect(revOut).connect(master);
+
+    // 楽器ごとの出口（dry と残響の割合、左右の位置）
+    const bus = (vol, wet, pan = 0) => {
+      const g = ctx.createGain(); g.gain.value = vol;
+      const p = ctx.createStereoPanner(); p.pan.value = pan;
+      g.connect(p); p.connect(master);
+      const w = ctx.createGain(); w.gain.value = wet; p.connect(w).connect(rev);
+      return g;
+    };
+    const noise = ctx.createBuffer(1, sr, sr);
+    { const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = R() * 2 - 1; }
+
+    // 音を1つ鳴らす
+    const note = (out, o) => {
+      const { t, dur = 0.5, freq, type = 'sine', vol = 0.2, a = 0.005, rel = 0.3, decay = 0, detune = 0, cutoff = 0, q = 0.7 } = o;
+      if (t >= T) return;
+      const osc = ctx.createOscillator(); osc.type = type; osc.frequency.value = freq; osc.detune.value = detune;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + a);
+      let end;
+      if (decay) { g.gain.setTargetAtTime(0, t + a, decay); end = t + a + decay * 6; }
+      else { g.gain.setValueAtTime(vol, t + Math.max(a, dur)); g.gain.linearRampToValueAtTime(0, t + Math.max(a, dur) + rel); end = t + Math.max(a, dur) + rel; }
+      let n = osc;
+      if (cutoff) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; f.Q.value = q; osc.connect(f); n = f; }
+      n.connect(g).connect(out);
+      osc.start(t); osc.stop(Math.min(end + 0.05, T + 0.1));
+    };
+    const kick = (out, t, vol = 0.9) => {
+      if (t >= T) return;
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+      g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+      o.connect(g).connect(out); o.start(t); o.stop(t + 0.42);
+    };
+    const hit = (out, t, { vol = 0.3, dur = 0.08, type = 'highpass', f = 7000, q = 0.8 } = {}) => {
+      if (t >= T) return;
+      const s = ctx.createBufferSource(); s.buffer = noise;
+      const fl = ctx.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q;
+      const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      s.connect(fl).connect(g).connect(out); s.start(t, R() * 0.5); s.stop(t + dur + 0.02);
+    };
+    // 2小節のメロディの型を作って繰り返す（和音の音から選ぶ）
+    const motif = Array.from({ length: 16 }, () => (R() < 0.62 ? Math.floor(R() * 3) : -1));
+    const melodyAt = (b, step, base) => {
+      const m = motif[(b % 2) * 8 + step];
+      if (m < 0) return null;
+      const tones = chordAt(b);
+      return tones[m] + base;
+    };
+
+    const pad = (out, b, t, o = {}) => chordAt(b, o.seventh).forEach((m, i) => {
+      const f = hz(m + (o.oct || 12));
+      note(out, { t, dur: bar - 0.1, freq: f, type: o.type || 'triangle', vol: o.vol || 0.05, a: o.a || 0.8, rel: o.rel || 1.0, cutoff: o.cutoff || 0, detune: i % 2 ? 6 : -6 });
+      if (o.layer) note(out, { t, dur: bar - 0.1, freq: f, type: o.layer, vol: (o.vol || 0.05) * 0.6, a: o.a || 0.8, rel: o.rel || 1.0, cutoff: o.cutoff || 0, detune: i % 2 ? -9 : 9 });
+    });
+
+    if (kind === 'piano') {
+      const keys = bus(0.9, 0.45, -0.1), padB = bus(0.7, 0.6, 0.15), bass = bus(0.9, 0.2);
+      const pat = [0, 2, 1, 2, 0, 2, 1, 2].map((x, i) => [x, i >= 4 ? 12 : 0]);
+      for (let b = 0; b < nBars; b++) {
+        const t0 = b * bar, ch = chordAt(b);
+        pad(padB, b, t0, { oct: 12, vol: 0.035, a: 1.2, type: 'sine', layer: 'triangle' });
+        note(bass, { t: t0, freq: hz(ch[0] - 12), vol: 0.22, decay: 0.9, type: 'sine' });
+        pat.forEach(([ix, up], i) => {
+          if (R() < 0.12) return;
+          const t = t0 + i * beat / 2, f = hz(ch[ix] + 12 + up);
+          note(keys, { t, freq: f, type: 'triangle', vol: 0.13, decay: 0.55 });
+          note(keys, { t, freq: f * 2, type: 'sine', vol: 0.03, decay: 0.3 });
+        });
+        if (b >= 2 && b % 2 === 0) { const m = melodyAt(b, 0, 24); if (m) note(keys, { t: t0, freq: hz(m), type: 'sine', vol: 0.08, decay: 1.1 }); }
+      }
+    } else if (kind === 'pop') {
+      const drum = bus(0.9, 0.08), bass = bus(0.8, 0.05), pl = bus(0.75, 0.2, -0.25), lead = bus(0.7, 0.3, 0.2);
+      for (let b = 0; b < nBars; b++) {
+        const t0 = b * bar, ch = chordAt(b);
+        for (let i = 0; i < 8; i++) {
+          const t = t0 + i * beat / 2;
+          if (b >= 1) {
+            if (i === 0 || i === 4 || (i === 5 && R() < 0.4)) kick(drum, t, 0.8);
+            if (i === 2 || i === 6) hit(drum, t, { vol: 0.35, dur: 0.16, type: 'bandpass', f: 1600, q: 0.6 });
+            hit(drum, t, { vol: i % 2 ? 0.08 : 0.12, dur: 0.04 });
+          }
+          if ([0, 2, 3, 5, 6].includes(i)) note(bass, { t, freq: hz(ch[0] - 12), type: 'triangle', vol: 0.25, decay: 0.16, cutoff: 900 });
+          if (i % 2 === 1) ch.forEach((m) => note(pl, { t, freq: hz(m + 12), type: 'square', vol: 0.035, decay: 0.09, cutoff: 2400 }));
+          if (b >= 2) { const m = melodyAt(b, i, 24); if (m) note(lead, { t, freq: hz(m), type: 'triangle', vol: 0.1, decay: 0.22 }); }
+        }
+      }
+    } else if (kind === 'strings') {
+      const str = bus(0.9, 0.6), low = bus(0.9, 0.35), perc = bus(0.8, 0.5), hi = bus(0.6, 0.6, 0.2);
+      // 後半に向かって盛り上げる
+      str.gain.setValueAtTime(0.55, 0); str.gain.linearRampToValueAtTime(1.05, Math.max(1, T - 2.5));
+      for (let b = 0; b < nBars; b++) {
+        const t0 = b * bar, ch = chordAt(b);
+        ch.forEach((m, i) => [-8, 0, 8].forEach((dt) => note(str, { t: t0, dur: bar - 0.05, freq: hz(m + (i === 0 ? 0 : 12)), type: 'sawtooth', vol: 0.018, a: 1.1, rel: 1.2, detune: dt, cutoff: 1500 })));
+        note(low, { t: t0, dur: bar - 0.1, freq: hz(ch[0] - 12), type: 'sawtooth', vol: 0.06, a: 0.4, rel: 0.8, cutoff: 450 });
+        if (b >= 2) {
+          note(perc, { t: t0, freq: 70, type: 'sine', vol: 0.35 + Math.min(0.3, b * 0.02), decay: 0.45 });
+          hit(perc, t0, { vol: 0.12, dur: 0.5, type: 'lowpass', f: 300 });
+        }
+        if (b >= Math.floor(nBars / 2)) { const m = melodyAt(b, 0, 24); if (m) note(hi, { t: t0, dur: bar * 0.9, freq: hz(m), type: 'sawtooth', vol: 0.035, a: 0.5, rel: 0.8, cutoff: 2600 }); }
+      }
+    } else if (kind === 'beat') {
+      const drum = bus(0.95, 0.05), bass = bus(0.8, 0.05), stab = bus(0.6, 0.3, 0.2);
+      for (let b = 0; b < nBars; b++) {
+        const t0 = b * bar, ch = chordAt(b);
+        for (let i = 0; i < 16; i++) {
+          const t = t0 + i * beat / 4;
+          if (i % 4 === 0) kick(drum, t, 0.95);
+          if (b >= 1 && (i === 4 || i === 12)) hit(drum, t, { vol: 0.4, dur: 0.18, type: 'bandpass', f: 1500, q: 0.5 });
+          if (i % 4 === 2) hit(drum, t, { vol: 0.16, dur: 0.12, f: 6500 });
+          else if (b >= 2) hit(drum, t, { vol: 0.05, dur: 0.03, f: 9000 });
+          if (i % 4 === 2) note(bass, { t, freq: hz(ch[0] - 12), type: 'sawtooth', vol: 0.16, decay: 0.12, cutoff: 700 });
+        }
+        if (b >= 2) [0.75, 2.5].forEach((x) => ch.forEach((m) => note(stab, { t: t0 + x * beat, freq: hz(m + 12), type: 'square', vol: 0.03, decay: 0.12, cutoff: 1900 })));
+      }
+    } else if (kind === 'synth') {
+      const arpB = bus(0.75, 0.25, -0.15), padB = bus(0.6, 0.5, 0.15), drum = bus(0.7, 0.05), bass = bus(0.75, 0.05);
+      // ディレイ（やまびこ）
+      const dl = ctx.createDelay(2); dl.delayTime.value = beat * 0.75;
+      const fb = ctx.createGain(); fb.gain.value = 0.35; const dw = ctx.createGain(); dw.gain.value = 0.3;
+      arpB.connect(dl); dl.connect(fb).connect(dl); dl.connect(dw).connect(master);
+      const order = [0, 1, 2, 3, 2, 1, 0, 1].map((x) => x);
+      for (let b = 0; b < nBars; b++) {
+        const t0 = b * bar, ch = chordAt(b, true);
+        pad(padB, b, t0, { oct: 0, vol: 0.03, a: 0.9, type: 'sawtooth', cutoff: 900, seventh: true });
+        for (let i = 0; i < 16; i++) {
+          const t = t0 + i * beat / 4;
+          const m = ch[order[i % 8] % ch.length] + 12 + (i >= 8 ? 12 : 0);
+          note(arpB, { t, freq: hz(m), type: 'square', vol: 0.04, decay: 0.07, cutoff: 1200 + 1600 * (0.5 + 0.5 * Math.sin(t * 0.6)) });
+          if (b >= 1) { if (i % 8 === 0) kick(drum, t, 0.6); if (i % 2 === 0) hit(drum, t, { vol: 0.05, dur: 0.03, f: 8000 }); }
+          if (i % 4 === 2) note(bass, { t, freq: hz(ch[0] - 12), type: 'sine', vol: 0.22, decay: 0.15 });
+        }
+      }
+    } else if (kind === 'bells') {
+      const bell = bus(0.85, 0.6, 0.1), padB = bus(0.7, 0.7, -0.1), bass = bus(0.8, 0.3);
+      for (let b = 0; b < nBars; b++) {
+        const t0 = b * bar, ch = chordAt(b, true);
+        pad(padB, b, t0, { oct: 12, vol: 0.03, a: 1.5, rel: 1.6, type: 'sine', layer: 'triangle', seventh: true });
+        note(bass, { t: t0, dur: bar * 0.9, freq: hz(ch[0] - 12), type: 'sine', vol: 0.14, a: 0.3, rel: 1 });
+        for (let i = 0; i < 8; i++) {
+          if (R() > 0.42) continue;
+          const t = t0 + i * beat / 2, f = hz(pick(ch) + 24 + (R() < 0.3 ? 12 : 0));
+          note(bell, { t, freq: f, type: 'sine', vol: 0.07, decay: 0.9 });
+          note(bell, { t, freq: f * 2.76, type: 'sine', vol: 0.018, decay: 0.4 });
+          note(bell, { t, freq: f * 5.4, type: 'sine', vol: 0.008, decay: 0.2 });
+        }
+      }
+    } else if (kind === 'musicbox') {
+      const box = bus(0.85, 0.5, 0.05), padB = bus(0.6, 0.6), bass = bus(0.7, 0.3);
+      for (let b = 0; b < nBars; b++) {
+        const t0 = b * bar, ch = chordAt(b);
+        pad(padB, b, t0, { oct: 0, vol: 0.025, a: 1, type: 'triangle' });
+        note(bass, { t: t0, freq: hz(ch[0] - 12), type: 'sine', vol: 0.16, decay: 0.8 });
+        for (let i = 0; i < 8; i++) {
+          const t = t0 + i * beat / 2;
+          const m = melodyAt(b, i, 24) ?? (i % 4 === 0 ? ch[0] + 24 : null);
+          if (m == null) continue;
+          const f = hz(m + 12);
+          note(box, { t, freq: f, type: 'sine', vol: 0.09, decay: 0.45 });
+          note(box, { t, freq: f * 4, type: 'sine', vol: 0.012, decay: 0.12 });
+        }
+      }
+    }
+    const out = await ctx.startRendering();
+    // 曲調による音量差をならす（平均を約-20dB、山は-1dBまで）
+    let sum = 0, peak = 0, n = 0;
+    for (let c = 0; c < out.numberOfChannels; c++) {
+      const d = out.getChannelData(c);
+      for (let i = 0; i < d.length; i += 4) { const v = d[i]; sum += v * v; n++; const av = Math.abs(v); if (av > peak) peak = av; }
+    }
+    const rms = Math.sqrt(sum / Math.max(1, n));
+    if (rms > 1e-5) {
+      const g = Math.min(0.1 / rms, 0.89 / Math.max(peak, 1e-5));
+      for (let c = 0; c < out.numberOfChannels; c++) { const d = out.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] *= g; }
+    }
+    return out;
+  }
+
+  // 書き出しとプレビューで使う BGM（同じ条件なら作り直さない）
+  let bgmCache = { key: '', p: null };
+  let fileVersion = 0;
+  function getBgmBuffer() {
+    const T = Math.max(0.5, timeline.total);
+    const key = bgmMode === 'auto' ? `auto|${currentKind()}|${musicSeed}|${T.toFixed(2)}` : `file|${fileVersion}|${T.toFixed(2)}`;
+    if (bgmCache.key !== key) {
+      const p = bgmMode === 'auto' ? makeMusic(currentKind(), musicSeed, T) : renderBgm(T);
+      bgmCache = { key, p };
+      p.catch(() => { if (bgmCache.p === p) bgmCache = { key: '', p: null }; });
+    }
+    return bgmCache.p;
+  }
+
+  // プレビューでの再生
+  let actx = null, bgmSrc = null, bgmGain = null, bgmToken = 0;
+  function startBgm() {
+    stopBgm();
+    if (!bgmActive()) return;
+    try { actx = actx || new AudioContext(); actx.resume(); } catch (e) { return; }
+    const token = ++bgmToken;
+    getBgmBuffer().then((buf) => {
+      if (!playing || token !== bgmToken) return;
+      const src = actx.createBufferSource(); src.buffer = buf;
+      const g = actx.createGain(); g.gain.value = bgmVol;
+      src.connect(g).connect(actx.destination);
+      src.start(0, Math.min(curT, Math.max(0, buf.duration - 0.01)));
+      bgmSrc = src; bgmGain = g;
+    }).catch(() => setStatus('BGMを準備できませんでした。別の音楽ファイルか「自動で作る」を試してください', true));
+  }
+  function stopBgm() {
+    bgmToken++;
+    if (bgmSrc) { try { bgmSrc.stop(); } catch (e) {} bgmSrc = null; }
+  }
+
+  function renderBgmUI() {
+    document.querySelectorAll('#bgmMode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.m === bgmMode)));
+    $('bgmAuto').hidden = bgmMode !== 'auto';
+    $('bgmFileRow').hidden = bgmMode !== 'file';
+    $('bgmVolRow').hidden = bgmMode === 'none';
+    $('bgmName').textContent = bgmFile ? bgmFile.name : '未選択';
+    $('bgmVol').value = Math.round(bgmVol * 100);
+    $('bgmVolTxt').textContent = Math.round(bgmVol * 100) + '%';
+    const sel = $('musicKind');
+    sel.innerHTML = '';
+    const o = document.createElement('option'); o.value = ''; o.textContent = `スタイルに合わせる（${MUSIC[STYLE_MUSIC[S.style] || 'piano'].name}）`; sel.appendChild(o);
+    Object.entries(MUSIC).forEach(([k, v]) => { const op = document.createElement('option'); op.value = k; op.textContent = v.name; sel.appendChild(op); });
+    sel.value = MUSIC[musicKind] ? musicKind : '';
+  }
+  const bgmChanged = () => { saveBgm(); renderBgmUI(); if (playing) { stop(); play(); } };
+  document.querySelectorAll('#bgmMode button').forEach((b) => (b.onclick = () => {
+    bgmMode = b.dataset.m;
+    if (bgmMode === 'file' && !bgmFile) { renderBgmUI(); $('bgmIn').click(); return; }
+    bgmChanged();
+  }));
+  $('musicKind').onchange = (e) => { musicKind = e.target.value; bgmChanged(); };
+  $('reroll').onclick = () => { musicSeed = (musicSeed % 9999) + 1 + Math.floor(Math.random() * 50); bgmChanged(); if (!playing) play(); };
+  $('bgmVol').oninput = (e) => {
+    bgmVol = Number(e.target.value) / 100;
+    $('bgmVolTxt').textContent = Math.round(bgmVol * 100) + '%';
+    if (bgmGain) bgmGain.gain.value = bgmVol;
+    saveBgm();
+  };
+
+  async function exportVideo() {
+    if (exporting || !timeline.total) return;
+    if (!('VideoEncoder' in window)) { setStatus('このブラウザは書き出しに対応していません。パソコンのChromeかEdgeで開いてください', true); return; }
+    stop(); exporting = true; resultBlob = null;
+    $('exportBtn').disabled = true; $('result').hidden = true; $('prog').hidden = false;
+    const bar = $('prog').firstElementChild; bar.style.width = '0%';
+    try {
+      setStatus('準備しています…');
+      await ensureFonts();
+      const { W, H } = dims();
+      const vc = await pickVideoCodec(W, H);
+      if (!vc) throw new Error('このブラウザでは動画の書き出し形式が使えません。最新のChromeかEdgeで開いてください');
+      const useBgm = bgmActive();
+      const ac = useBgm ? await pickAudioCodec(vc.box) : null;
+      const T = timeline.total, n = Math.round(T * FPS);
+      let muxer, target;
+      if (vc.box === 'mp4') {
+        target = new Mp4Muxer.ArrayBufferTarget();
+        muxer = new Mp4Muxer.Muxer({
+          target, fastStart: 'in-memory', firstTimestampBehavior: 'offset',
+          video: { codec: 'avc', width: W, height: H, frameRate: FPS },
+          audio: ac ? { codec: ac.mux, numberOfChannels: 2, sampleRate: 48000 } : undefined,
+        });
+      } else {
+        target = new WebMMuxer.ArrayBufferTarget();
+        muxer = new WebMMuxer.Muxer({
+          target, firstTimestampBehavior: 'offset',
+          video: { codec: vc.codec.startsWith('vp09') ? 'V_VP9' : 'V_VP8', width: W, height: H, frameRate: FPS },
+          audio: ac ? { codec: 'A_OPUS', numberOfChannels: 2, sampleRate: 48000 } : undefined,
+        });
+      }
+      let encErr = null;
+      const enc = new VideoEncoder({ output: (ch, meta) => muxer.addVideoChunk(ch, meta), error: (e) => (encErr = e) });
+      enc.configure(vc.cfg);
+      const oc = new OffscreenCanvas(W, H);
+      const octx = oc.getContext('2d');
+      for (let i = 0; i < n; i++) {
+        if (encErr) throw encErr;
+        const t = i / FPS;
+        const seg = segAt(t);
+        const local = t - seg.start;
+        if (seg.type === 'cut' && seg.cut.kind === 'video') await seekVideo(seg.cut.src, local);
+        drawSeg(octx, W, H, seg, local);
+        const frame = new VideoFrame(oc, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
+        enc.encode(frame, { keyFrame: i % (FPS * 2) === 0 });
+        frame.close();
+        while (enc.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 4));
+        if (i % 10 === 0) {
+          bar.style.width = `${Math.round((i / n) * (useBgm ? 90 : 100))}%`;
+          setStatus(`書き出し中… ${Math.round((i / n) * 100)}%（${fmt(t)} / ${fmt(T)}）`);
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+      await enc.flush(); enc.close();
+      if (encErr) throw encErr;
+
+      if (useBgm && ac) {
+        setStatus('BGMを入れています…');
+        const buf = await getBgmBuffer();
+        let aErr = null;
+        const aenc = new AudioEncoder({ output: (ch, meta) => muxer.addAudioChunk(ch, meta), error: (e) => (aErr = e) });
+        aenc.configure(ac.cfg);
+        const L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+        const step = 4800;
+        for (let off = 0; off < buf.length; off += step) {
+          const k = Math.min(step, buf.length - off);
+          const data = new Float32Array(k * 2);
+          data.set(L.subarray(off, off + k), 0); data.set(R.subarray(off, off + k), k);
+          for (let j = 0; j < data.length; j++) data[j] *= bgmVol;
+          const ad = new AudioData({ format: 'f32-planar', sampleRate: 48000, numberOfFrames: k, numberOfChannels: 2, timestamp: Math.round((off / 48000) * 1e6), data });
+          aenc.encode(ad); ad.close();
+        }
+        await aenc.flush(); aenc.close();
+        if (aErr) throw aErr;
+      }
+      muxer.finalize();
+      resultExt = vc.box;
+      resultBlob = new Blob([target.buffer], { type: vc.box === 'mp4' ? 'video/mp4' : 'video/webm' });
+      window.__lastExport = { size: resultBlob.size, ext: resultExt, codec: vc.codec, audio: ac ? ac.cfg.codec : null, seconds: T };
+      bar.style.width = '100%';
+      const mb = (resultBlob.size / 1048576).toFixed(1);
+      setStatus(`できました（${T.toFixed(1)}秒・${mb}MB${useBgm && !ac ? '・このブラウザではBGMを入れられませんでした' : ''}）。下の画面で確認して保存してください`);
+      showResult();
+    } catch (e) {
+      setStatus('書き出しに失敗しました：' + (e && e.message ? e.message : e), true);
+    } finally {
+      exporting = false; $('exportBtn').disabled = !timeline.total;
+      setTimeout(() => { $('prog').hidden = true; }, 600);
+    }
+  }
+  $('exportBtn').onclick = exportVideo;
+
+  let resultUrl = null;
+  function showResult() {
+    const scr = $('screen');
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
+    resultUrl = URL.createObjectURL(resultBlob);
+    scr.innerHTML = '';
+    const v = document.createElement('video'); v.src = resultUrl; v.controls = true; v.playsInline = true;
+    scr.appendChild(v);
+    $('result').hidden = false;
+  }
+  $('backBtn').onclick = () => {
+    const scr = $('screen'); scr.innerHTML = ''; scr.appendChild(pv); $('result').hidden = true; drawPreview();
+  };
+  $('saveBtn').onclick = async () => {
+    if (!resultBlob) return;
+    const d = new Date(), p = (x) => String(x).padStart(2, '0');
+    const filename = `メッセージ動画_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.${resultExt}`;
+    // claude.ai の中では専用の保存、それ以外（ファイルで開いた時など）は普通のダウンロード
+    if (!window.claude) {
+      const a = document.createElement('a');
+      // 環境によって日本語のファイル名が崩れるため、ここでは英数字の名前にする
+      a.href = resultUrl; a.download = filename.replace('メッセージ動画', 'message-movie');
+      document.body.appendChild(a); a.click(); a.remove();
+      setStatus('保存しました（ダウンロードフォルダを確認してください）');
+      return;
+    }
+    let dl = null;
+    try { dl = await window.claude.use('downloads'); } catch (e) {}
+    if (!dl) { setStatus('この画面では保存できません。ページを開き直してください', true); return; }
+    try {
+      await dl.save({ filename, data: resultBlob });
+      setStatus('保存しました');
+    } catch (e) {
+      if (e && e.code === 'declined') setStatus('保存をキャンセルしました');
+      else if (e && e.code === 'rate_limited') setStatus('保存の確認画面がすでに開いています。そちらで操作してください', true);
+      else setStatus('保存できませんでした（' + ((e && e.code) || 'unknown') + '）', true);
+    }
+  };
+
+  // ---- サンプル ----
+  async function sampleCut(n, hue, title) {
+    const cv = new OffscreenCanvas(1600, 1000), x = cv.getContext('2d');
+    const g = x.createLinearGradient(0, 0, 0, 1000);
+    g.addColorStop(0, `hsl(${hue} 45% 78%)`); g.addColorStop(1, `hsl(${hue} 35% 40%)`);
+    x.fillStyle = g; x.fillRect(0, 0, 1600, 1000);
+    for (let k = 0; k < 3; k++) {
+      x.fillStyle = `hsl(${hue + 20} ${30 + k * 8}% ${48 - k * 10}%)`;
+      x.beginPath(); x.moveTo(0, 1000);
+      for (let px = 0; px <= 1600; px += 40) x.lineTo(px, 560 + k * 130 + Math.sin(px / (180 + k * 60) + n + k) * (60 - k * 12));
+      x.lineTo(1600, 1000); x.closePath(); x.fill();
+    }
+    x.fillStyle = 'rgba(255,255,255,.9)'; x.font = '600 64px "Zen Kaku Gothic New", sans-serif'; x.textAlign = 'center';
+    x.fillText(title, 800, 300);
+    const bmp = await createImageBitmap(cv);
+    return { id: ++uid, name: `サンプル${n}.jpg`, kind: 'image', src: bmp, w: 1600, h: 1000, duration: Infinity, sample: true };
+  }
+  async function loadSamples() {
+    await ensureFonts();
+    const defs = [
+      [1, 150, 'サンプル写真 1', 'はじめの一歩から', 'From the first step'],
+      [2, 95, 'サンプル写真 2', '想いを\nかたちに', 'Turning ideas into reality'],
+      [3, 30, 'サンプル写真 3', 'これからも、\nとなりで。', 'Always by your side'],
+    ];
+    for (const [n, hue, title, msg, sub] of defs) {
+      const c = await sampleCut(n, hue, title); c.msg = msg; c.sub = sub; c.subAuto = true; cuts.push(c);
+    }
+    curT = 1.5; // 最初の画面は暗転中ではなく1カット目を見せる
+    refresh();
+  }
+
+  renderSettings();
+  refresh();
+  loadSamples();
+})();
+</script>
+
+</body>
+</html>
