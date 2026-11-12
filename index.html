@@ -116,7 +116,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 .cut .no { grid-area: no; font-family: var(--font-mono); color: var(--accent); font-size: .78rem; align-self: start; padding-top: 2px; }
 .cut .thumb { grid-area: th; }
 .cut .fields { display: contents; }
-.cut .fname { grid-area: nm; align-self: start; padding-top: 2px; }
+.cut .fname { align-self: start; }
 .cut textarea { grid-area: ta; }
 .cut .subrow { grid-area: sub; }
 .cut .ops { grid-area: ops; flex-direction: row; align-self: start; }
@@ -136,6 +136,12 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 .endcard .thumb { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: .7rem; background: var(--field); }
 .endcard img { max-width: 90%; max-height: 80%; object-fit: contain; }
 .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.vol.endsec input { flex: none; width: 5em; font-family: var(--font-mono); text-align: right; padding: 3px 6px; }
+.meta { grid-area: nm; display: flex; flex-direction: column; gap: 4px; min-width: 0; align-self: start; }
+.meta .fname { padding-top: 2px; }
+.secrow { display: flex; align-items: center; gap: 5px; font-size: .74rem; color: var(--muted); white-space: nowrap; }
+.secrow input { width: 4.6em; font-family: var(--font-mono); text-align: right; padding: 2px 6px; font-size: .78rem; }
+.secrow .tc { font-size: .74rem; }
 .bgm-auto { display: flex; flex-direction: column; gap: 6px; }
 .bgm-auto select { flex: 1; min-width: 0; width: auto; }
 .vol { display: flex; align-items: center; gap: 8px; font-size: .78rem; color: var(--muted); }
@@ -319,6 +325,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
           <div class="fields">
             <label class="btn" for="logoIn" style="align-self:flex-start">ロゴ画像を選ぶ<input id="logoIn" type="file" accept="image/*"></label>
             <input type="text" id="tagline" placeholder="締めの一言（例：これからも、となりで。）">
+            <label class="vol endsec" for="endSec">表示（秒）<input type="number" id="endSec" min="0.5" max="30" step="0.5"><span class="note" id="endSecHint"></span></label>
             <label class="vol" for="logoSize">ロゴの大きさ<input type="range" id="logoSize" min="50" max="250" step="10"><span class="tc" id="logoSizeTxt"></span></label>
           </div>
         </div>
@@ -387,14 +394,15 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 
       <div class="sec">
         <div class="field">
-          <span title="指定すると、カットの秒数を自動で決めて全体をこの長さにします">全体の長さ（0分0.0秒＝指定しない）</span>
+          <span title="秒数を指定していない写真のカットで、残りの時間を分け合います">全体の長さ（0分0.0秒＝指定しない）</span>
           <div class="duration">
             <input type="number" id="durMin" min="0" max="10" step="1" inputmode="numeric" aria-label="分"><span>分</span>
             <input type="number" id="durSec" min="0" max="59.9" step="0.1" inputmode="decimal" aria-label="秒"><span>秒</span>
           </div>
+          <span class="note" id="fitNote"></span>
         </div>
         <div class="pair three">
-          <label for="cutSec" title="全体の長さを指定しているときは自動で決まります">カット（秒）<input type="number" id="cutSec" min="0.5" max="15" step="0.5"></label>
+          <label for="cutSec" title="秒数を指定していない写真のカットの長さ。全体の長さを指定しているときは自動で決まります">写真（秒）<input type="number" id="cutSec" min="0.5" max="15" step="0.5"></label>
           <label for="textSec" title="カットとカットの間に入る白紙画面（メッセージ）の秒数。0で挟まない">白紙・文字（秒）<input type="number" id="textSec" min="0" max="10" step="0.5"></label>
           <label for="trSec" title="フェードなど切り替えにかける秒数。空欄ならスタイルのおすすめ">切り替え（秒）<input type="number" id="trSec" min="0" max="3" step="0.1"></label>
         </div>
@@ -492,6 +500,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
   delete S.fade;
   if (!['doc', 'simple', 'pop', 'cinema', 'dynamic', 'elegant', 'tech', 'film'].includes(S.style)) S.style = 'doc';
   if (typeof S.cutTr !== 'string') S.cutTr = '';
+  if (!(Number.isFinite(S.endSec) && S.endSec > 0)) S.endSec = null;
   if (!(Number.isFinite(S.logoScale) && S.logoScale >= 0.5 && S.logoScale <= 2.5)) S.logoScale = 1;
   if (!(Number.isFinite(S.trSec) && S.trSec >= 0)) S.trSec = null;
   if (!(Number.isFinite(S.textSec) && S.textSec >= 0)) S.textSec = 2.5;
@@ -521,31 +530,39 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 
   // ---- 尺の計算 ----
   // 並び：カット → 白紙画面（メッセージ） → カット … → 最後の画面
-  // 白紙画面とメッセージの秒数は指定どおり。全体の長さを指定したときは、カットの秒数だけで合わせる
+  // 長さの決まり方
+  //  ・カットに「表示（秒）」を入れたら、その秒数（動画はトリミングした長さが上限）
+  //  ・入れていない動画は、トリミングした範囲をすべて使う
+  //  ・入れていない写真は「写真（秒）」。全体の長さを指定したときは、これらの写真で残りの時間を分け合う
+  //  ・白紙画面・最後の画面は指定どおり
+  const trimLen = (c) => Math.max(0.5, c.tout - c.tin);
+  const endSec = () => (Number.isFinite(S.endSec) && S.endSec > 0 ? S.endSec : Math.max(2, S.textSec + 1));
   function buildTimeline() {
     const raw = [];
     cuts.forEach((c, i) => {
-      raw.push({ type: 'cut', cut: c, idx: i, base: S.cutSec, limit: c.kind === 'video' ? Math.max(0.5, c.tout - c.tin) : Infinity });
+      const lim = c.kind === 'video' ? trimLen(c) : Infinity;
+      if (c.secs > 0) raw.push({ type: 'cut', cut: c, idx: i, base: Math.min(c.secs, lim), fixed: true });
+      else if (c.kind === 'video') raw.push({ type: 'cut', cut: c, idx: i, base: lim, fixed: true });
+      else raw.push({ type: 'cut', cut: c, idx: i, base: S.cutSec, fixed: false });
       const lines = c.msg.split('\n').map((s) => s.trim()).filter(Boolean);
       const hasMsg = lines.length > 0 || !!c.sub.trim();
       const isLast = i === cuts.length - 1;
       // メッセージがなくても、カットとカットの間には白紙画面を挟む（0秒なら挟まない）
       if (S.textSec > 0 && (hasMsg || !isLast)) raw.push({ type: 'text', lines, sub: c.sub.trim(), idx: i, blank: !hasMsg, base: S.textSec, fixed: true });
     });
-    if (logo || tagline.trim()) raw.push({ type: 'end', base: Math.max(2, S.textSec + 1), fixed: true });
+    if (logo || tagline.trim()) raw.push({ type: 'end', base: endSec(), fixed: true });
 
-    const durs = raw.map((s) => (s.fixed ? s.base : Math.min(s.base, s.limit)));
+    const durs = raw.map((s) => s.base);
+    const open = raw.map((s, i) => (!s.fixed ? i : -1)).filter((i) => i >= 0);
+    let fit = 'none';
     if (S.target > 0) {
       const fixedTotal = raw.reduce((a, s, i) => a + (s.fixed ? durs[i] : 0), 0);
-      let room = Math.max(0, S.target - fixedTotal);
-      // カットに均等に配り、動画の長さで頭打ちになった分はほかのカットへ回す
-      let open = raw.map((s, i) => (s.type === 'cut' ? i : -1)).filter((i) => i >= 0);
-      for (let k = 0; k < 6 && open.length; k++) {
-        const each = room / open.length;
-        const capped = open.filter((i) => raw[i].limit < each);
-        if (!capped.length) { open.forEach((i) => (durs[i] = each)); break; }
-        capped.forEach((i) => { durs[i] = raw[i].limit; room -= raw[i].limit; });
-        open = open.filter((i) => !capped.includes(i));
+      if (!open.length) fit = 'nofree';
+      else {
+        const each = (S.target - fixedTotal) / open.length;
+        if (each < 0.5) fit = 'tooshort';
+        else fit = 'ok';
+        open.forEach((i) => (durs[i] = Math.max(0.5, each)));
       }
     }
     let t = 0;
@@ -555,7 +572,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       t += dur;
       return seg;
     });
-    timeline = { segs, total: t };
+    timeline = { segs, total: t, fit, autoCount: open.length };
   }
   const segAt = (t) => timeline.segs.find((s) => t >= s.start && t < s.start + s.dur) || timeline.segs[timeline.segs.length - 1];
 
@@ -1223,6 +1240,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     if (apply && tr.c) {
       tr.c.tin = Math.round(tr.tin * 10) / 10;
       tr.c.tout = Math.round(tr.tout * 10) / 10;
+      if (tr.c.secs > trimLen(tr.c)) tr.c.secs = Math.round(trimLen(tr.c) * 10) / 10;
       tr.c.stabLevel = tr.level; tr.c.stabRaw = tr.raw; tr.c.stab = tr.stab;
       refresh();
     }
@@ -1282,7 +1300,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     const d = trimSegDur(c);
     $('trimNote').textContent = d == null ? '' :
       `動画の中では、開始位置から最長で終了位置まで使います。いまの設定だと、このカットは約${Math.min(d, len).toFixed(1)}秒です` +
-      (len > d + 0.05 ? `（全体の長さに合わせるため、終了位置より前で次の画面に切り替わります）。` : '。');
+      (len > d + 0.05 ? `（表示の秒数を指定しているため、終了位置より前で次の画面に切り替わります）。` : '。');
     updatePlayhead();
   }
   const MIN_LEN = 0.5;
@@ -1423,6 +1441,26 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       th.appendChild(badge);
       const fields = document.createElement('div'); fields.className = 'fields';
       const nm = document.createElement('div'); nm.className = 'fname'; nm.textContent = c.name;
+      const meta = document.createElement('div'); meta.className = 'meta';
+      const secrow = document.createElement('label'); secrow.className = 'secrow'; secrow.htmlFor = 'secs-' + c.id;
+      const secIn = document.createElement('input'); secIn.type = 'number'; secIn.id = 'secs-' + c.id; secIn.min = '0.5'; secIn.step = '0.5';
+      secIn.value = c.secs > 0 ? c.secs : '';
+      if (c.kind === 'video') { secIn.max = trimLen(c).toFixed(1); secIn.placeholder = trimLen(c).toFixed(1); }
+      else { secIn.max = '60'; secIn.placeholder = 'おまかせ'; }
+      secIn.title = c.kind === 'video' ? '空欄なら、トリミングした範囲をすべて使います' : '空欄なら「写真（秒）」の長さ。全体の長さを指定しているときは自動で決まります';
+      const applySecs = (final) => {
+        const raw = secIn.value.trim(), v = Number(raw);
+        if (raw === '') c.secs = null;
+        else if (Number.isFinite(v) && v > 0) c.secs = Math.round(Math.min(c.kind === 'video' ? trimLen(c) : 60, Math.max(0.5, v)) * 10) / 10;
+        else if (!final) return;
+        if (final) secIn.value = c.secs > 0 ? c.secs : '';
+        rebuild();
+      };
+      secIn.addEventListener('input', () => applySecs(false));
+      secIn.addEventListener('change', () => applySecs(true));
+      const durTxt = document.createElement('span'); durTxt.className = 'tc'; durTxt.id = 'dur-' + c.id;
+      secrow.append('表示', secIn, '秒', durTxt);
+      meta.append(nm, secrow);
       const ta = document.createElement('textarea'); ta.id = 'msg-' + c.id; ta.rows = 2; ta.value = c.msg;
       ta.placeholder = 'このカットの後に出すメッセージ（改行もそのまま反映）';
       ta.setAttribute('aria-label', `カット${i + 1}の後のメッセージ`);
@@ -1454,7 +1492,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
         tb.onclick = () => { if (c.msg.trim()) { c.subAuto = true; translate(c); } };
         subrow.appendChild(tb);
       }
-      fields.append(nm, ta, subrow);
+      fields.append(meta, ta, subrow);
       const ops = document.createElement('div'); ops.className = 'ops';
       const mk = (label, aria, fn, disabled) => {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost'; b.textContent = label;
@@ -1517,6 +1555,20 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     ensureFonts().then(() => { if (!playing) drawPreview(); });
     rebuild();
   }));
+  const showEndSec = () => { $('endSec').value = S.endSec ?? ''; $('endSec').placeholder = String(Math.max(2, S.textSec + 1)); $('endSecHint').textContent = S.endSec ? '' : '（空欄＝おまかせ）'; };
+  showEndSec();
+  const applyEndSec = (final) => {
+    const raw = $('endSec').value.trim(), v = Number(raw);
+    if (raw === '') S.endSec = null;
+    else if (Number.isFinite(v) && v > 0) S.endSec = Math.round(Math.min(30, Math.max(0.5, v)) * 10) / 10;
+    else if (!final) return;
+    if (final) showEndSec();
+    saveSettings(); rebuild();
+    const end = timeline.segs.find((x) => x.type === 'end');
+    if (end && !playing) { curT = end.start + end.dur / 2; drawPreview(); }
+  };
+  $('endSec').addEventListener('input', () => applyEndSec(false));
+  $('endSec').addEventListener('change', () => applyEndSec(true));
   const showLogoSize = () => { $('logoSize').value = Math.round(S.logoScale * 100); $('logoSizeTxt').textContent = Math.round(S.logoScale * 100) + '%'; };
   showLogoSize();
   $('logoSize').addEventListener('input', (e) => {
@@ -1577,12 +1629,28 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 
   function rebuild() {
     buildTimeline();
+    updateCutDurs();
     curT = Math.min(curT, timeline.total);
     renderStrip();
     $('exportBtn').disabled = !timeline.total || exporting;
     if (!playing) drawPreview();
   }
   function refresh() { renderCuts(); rebuild(); }
+  // カットごとの実際の秒数と、全体の長さについての注意を出す
+  function updateCutDurs() {
+    timeline.segs.forEach((sg) => {
+      if (sg.type !== 'cut') return;
+      const el = document.getElementById('dur-' + sg.cut.id);
+      if (el) el.textContent = sg.cut.secs > 0 || sg.cut.kind === 'video' ? '' : `→ ${sg.dur.toFixed(1)}秒`;
+    });
+    const n = $('fitNote');
+    if (!n) return;
+    const f = timeline.fit;
+    n.textContent = f === 'nofree' ? `秒数を決めていない写真がないため、合計 ${timeline.total.toFixed(1)}秒 になります`
+      : f === 'tooshort' ? `指定した秒数だけで長さを超えるため、合計 ${timeline.total.toFixed(1)}秒 になります`
+      : '';
+    n.hidden = !n.textContent;
+  }
 
   // ---- 英訳（Chrome に内蔵の翻訳。パソコンの中だけで動き、アカウント不要） ----
   let trReady = false;      // この環境で翻訳が使えるか
