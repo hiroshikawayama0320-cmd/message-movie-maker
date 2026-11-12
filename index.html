@@ -864,7 +864,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       const c = seg.cut;
       if (c.kind === 'image') drawCover(lc, c.src, c.w, c.h, W, H, 1 + sty.zoom * (local / seg.dur));
       else if (c.src.readyState >= 2) {
-        const sb = stabAt(c.stab, c.src.currentTime);
+        const ft = !exporting && c.src.__mt != null && !c.src.seeking ? c.src.__mt : c.src.currentTime;
+        const sb = stabAt(c.stab, ft);
         drawCover(lc, c.src, c.w, c.h, W, H, (1 + sty.zoom * 0.5 * (local / seg.dur)) * sb.zoom, sb.dx, sb.dy);
       }
       composite(ctx, layer, sty.cut, phase(sty.cutT, local, seg.dur), W, H, seed);
@@ -989,6 +990,19 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
   const isVideoFile = (f) => f.type.startsWith('video/') || VIDEO_EXT.includes(extOf(f));
   const isImageFile = (f) => f.type.startsWith('image/') || IMAGE_EXT.includes(extOf(f));
 
+  // 再生中、画面に実際に出ているコマの時刻（currentTime は少し先を指すことがあり、補正がずれてブルブルの原因になる）
+  function trackFrames(v) {
+    if (!('requestVideoFrameCallback' in v)) return;
+    const cb = (_now, meta) => { v.__mt = meta.mediaTime; v.requestVideoFrameCallback(cb); };
+    v.requestVideoFrameCallback(cb);
+  }
+  function holdVideo(v) {
+    // コマの知らせを確実に受け取るため、見えない状態でページに置く
+    let h = document.getElementById('vidHold');
+    if (!h) { h = document.createElement('div'); h.id = 'vidHold'; h.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0;pointer-events:none'; document.body.appendChild(h); }
+    v.style.cssText = 'width:2px;height:2px';
+    h.appendChild(v);
+  }
   async function loadMedia(file) {
     if (isImageFile(file)) {
       try {
@@ -1003,6 +1017,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       v.muted = true; v.playsInline = true; v.preload = 'auto';
       const url = URL.createObjectURL(file);
       v.src = url;
+      holdVideo(v); trackFrames(v);
       try {
         await new Promise((res, rej) => {
           const to = setTimeout(() => rej(new Error('timeout')), 20000);
@@ -1221,6 +1236,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     renderStabUI();
     const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = c.src.currentSrc || c.src.src;
+    holdVideo(v); trackFrames(v);
     tr.v = v;
     const cv = $('trimCanvas');
     const sc = Math.min(1, 960 / Math.max(c.w, c.h));
@@ -1245,17 +1261,19 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       refresh();
     }
     tr.filmToken++; tr.stabToken = (tr.stabToken || 0) + 1;
-    if (tr.v) { tr.v.removeAttribute('src'); tr.v.load(); }
+    if (tr.v) { tr.v.removeAttribute('src'); tr.v.load(); tr.v.remove(); }
     tr.v = null; tr.c = null;
     $('trim').hidden = true;
     document.querySelector('.wrap').inert = false;
   }
-  function drawTrimFrame() {
+  function drawTrimFrame(e) {
     if (!tr.v || !tr.c) return;
     const cv = $('trimCanvas'), x = cv.getContext('2d');
     x.fillStyle = '#000'; x.fillRect(0, 0, cv.width, cv.height);
     if (tr.v.readyState >= 2) {
-      const sb = stabAt(tr.stab, tr.v.currentTime);
+      // 再生中は画面に出ているコマの時刻、止めて位置を動かしたときは currentTime
+      const ft = tr.playing && tr.v.__mt != null ? tr.v.__mt : tr.v.currentTime;
+      const sb = stabAt(tr.stab, ft);
       drawCover(x, tr.v, tr.c.w, tr.c.h, cv.width, cv.height, sb.zoom, sb.dx, sb.dy);
     }
   }
@@ -1403,9 +1421,11 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     tr.playing = true; $('trimPlay').textContent = '■ 停止';
     tr.v.currentTime = (tr.pos >= tr.tin && tr.pos < tr.tout - 0.1) ? tr.pos : tr.tin;
     tr.v.play().catch(() => stopTrimPlay());
+    let lastMt = -1;
     const loop = () => {
       if (!tr.playing || !tr.v) return;
-      tr.pos = tr.v.currentTime; updatePlayhead(); drawTrimFrame();
+      tr.pos = tr.v.currentTime; updatePlayhead();
+      if (tr.v.__mt == null || tr.v.__mt !== lastMt) { lastMt = tr.v.__mt ?? -1; drawTrimFrame(); }
       if (tr.v.currentTime >= tr.tout || tr.v.ended) { stopTrimPlay(); seekTrim(tr.tin); return; }
       tr.raf = requestAnimationFrame(loop);
     };
