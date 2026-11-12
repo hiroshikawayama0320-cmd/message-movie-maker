@@ -213,6 +213,9 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 .trim-row label { display: flex; align-items: center; gap: 5px; font-size: .82rem; color: var(--muted); }
 .trim-row input { width: 5.5em; font-family: var(--font-mono); text-align: right; padding: 4px 6px; }
 .trim-row .spacer { flex: 1; }
+.stab-row .seg { width: auto; }
+.stab-row .seg button { padding: 5px 14px; }
+#stabSeg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); }
 
 /* ---- パスワード画面 ---- */
 .gate { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
@@ -316,6 +319,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
           <div class="fields">
             <label class="btn" for="logoIn" style="align-self:flex-start">ロゴ画像を選ぶ<input id="logoIn" type="file" accept="image/*"></label>
             <input type="text" id="tagline" placeholder="締めの一言（例：これからも、となりで。）">
+            <label class="vol" for="logoSize">ロゴの大きさ<input type="range" id="logoSize" min="50" max="250" step="10"><span class="tc" id="logoSizeTxt"></span></label>
           </div>
         </div>
       </div>
@@ -441,6 +445,17 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       <span class="spacer"></span>
       <button type="button" id="trimPlay">▶ 範囲を再生</button>
     </div>
+    <div class="trim-row stab-row">
+      <span class="flabel">手ぶれ補正</span>
+      <div class="seg" id="stabSeg">
+        <button type="button" data-l="off">なし</button>
+        <button type="button" data-l="low">弱</button>
+        <button type="button" data-l="mid">中</button>
+        <button type="button" data-l="high">強</button>
+      </div>
+      <span class="note" id="stabMsg"></span>
+      <div class="progress" id="stabProg" hidden><div></div></div>
+    </div>
     <div class="trim-row">
       <button type="button" id="trimSetIn">今の位置を開始に</button>
       <button type="button" id="trimSetOut">今の位置を終了に</button>
@@ -477,6 +492,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
   delete S.fade;
   if (!['doc', 'simple', 'pop', 'cinema', 'dynamic', 'elegant', 'tech', 'film'].includes(S.style)) S.style = 'doc';
   if (typeof S.cutTr !== 'string') S.cutTr = '';
+  if (!(Number.isFinite(S.logoScale) && S.logoScale >= 0.5 && S.logoScale <= 2.5)) S.logoScale = 1;
   if (!(Number.isFinite(S.trSec) && S.trSec >= 0)) S.trSec = null;
   if (!(Number.isFinite(S.textSec) && S.textSec >= 0)) S.textSec = 2.5;
   if (typeof S.textTr !== 'string') S.textTr = '';
@@ -729,10 +745,11 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     ctx.restore();
   }
 
-  function drawCover(ctx, src, sw, sh, W, H, zoom) {
+  // dx, dy は元の動画の画素で、絵をずらす量（手ぶれ補正用）
+  function drawCover(ctx, src, sw, sh, W, H, zoom, dx = 0, dy = 0) {
     const s = Math.max(W / sw, H / sh) * zoom;
     const dw = sw * s, dh = sh * s;
-    ctx.drawImage(src, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    ctx.drawImage(src, (W - dw) / 2 + dx * s, (H - dh) / 2 + dy * s, dw, dh);
   }
   // 改行を守りつつ、幅に収まらない行は単語の切れ目（日本語なら文字単位）で折り返す
   function wrapText(ctx, text, maxW) {
@@ -829,7 +846,10 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     if (seg.type === 'cut') {
       const c = seg.cut;
       if (c.kind === 'image') drawCover(lc, c.src, c.w, c.h, W, H, 1 + sty.zoom * (local / seg.dur));
-      else if (c.src.readyState >= 2) drawCover(lc, c.src, c.w, c.h, W, H, 1 + sty.zoom * 0.5 * (local / seg.dur));
+      else if (c.src.readyState >= 2) {
+        const sb = stabAt(c.stab, c.src.currentTime);
+        drawCover(lc, c.src, c.w, c.h, W, H, (1 + sty.zoom * 0.5 * (local / seg.dur)) * sb.zoom, sb.dx, sb.dy);
+      }
       composite(ctx, layer, sty.cut, phase(sty.cutT, local, seg.dur), W, H, seed);
       if (sty.letterbox) {
         // シネマ：上下の黒帯（横は2.35:1、縦は上下12%）
@@ -851,7 +871,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       } else {
         const hasTag = tagline.trim();
         if (logo) {
-          const bw = W * 0.6, bh = H * (hasTag ? 0.22 : 0.3);
+          const k = S.logoScale || 1;
+          const bw = Math.min(W * 0.92, W * 0.6 * k), bh = Math.min(H * (hasTag ? 0.6 : 0.85), H * (hasTag ? 0.22 : 0.3) * k);
           const s = Math.min(bw / logo.bitmap.width, bh / logo.bitmap.height);
           const dw = logo.bitmap.width * s, dh = logo.bitmap.height * s;
           const cy = hasTag ? H / 2 - dh * 0.35 : H / 2;
@@ -1034,6 +1055,138 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
   };
 
 
+  // ================= 手ぶれ補正 =================
+  // 1. 動画を全コマ読み、小さく縮めた白黒画像の「縦・横の明るさの並び」を前のコマと比べて、ずれ（揺れ）を測る
+  // 2. ずれを積み上げたカメラの動きを、なめらかな動きにならす
+  // 3. 「なめらかな動き − 実際の動き」だけ絵をずらし、端が見えないよう少し拡大する
+  const STAB_FPS = 30;
+  const STAB_LEVELS = { off: { name: 'なし' }, low: { name: '弱', win: 0.4 }, mid: { name: '中', win: 0.9 }, high: { name: '強', win: 1.8 } };
+  const NO_STAB = { dx: 0, dy: 0, zoom: 1 };
+  function stabAt(st, t) {
+    if (!st) return NO_STAB;
+    // 今表示しているコマの補正を使う（コマの間を混ぜると、細かい揺れが残る）
+    const i = Math.max(0, Math.min(st.cx.length - 1, Math.floor(t * st.fps + 1e-3)));
+    return { dx: st.cx[i], dy: st.cy[i], zoom: st.zoom };
+  }
+  function profiles(img, w, h) {
+    const col = new Float32Array(w), row = new Float32Array(h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const k = (y * w + x) * 4;
+        const g = img[k] * 0.299 + img[k + 1] * 0.587 + img[k + 2] * 0.114;
+        col[x] += g; row[y] += g;
+      }
+    }
+    // 明るさの変化に左右されないよう、となりとの差（輪郭）で比べる
+    const diff = (a) => { const d = new Float32Array(a.length - 1); for (let i = 0; i < d.length; i++) d[i] = a[i + 1] - a[i]; return d; };
+    return { col: diff(col), row: diff(row) };
+  }
+  function bestShift(a, b, maxS) {
+    let best = 0, bestErr = Infinity;
+    const errs = {};
+    for (let s = -maxS; s <= maxS; s++) {
+      let e = 0, n = 0;
+      const lo = Math.max(0, -s), hi = Math.min(a.length, b.length - s);
+      for (let i = lo; i < hi; i++) { e += Math.abs(a[i] - b[i + s]); n++; }
+      e /= Math.max(1, n); errs[s] = e;
+      if (e < bestErr) { bestErr = e; best = s; }
+    }
+    // となりの値で、1画素より細かく見積もる
+    const l = errs[best - 1], r = errs[best + 1];
+    if (l != null && r != null) { const den = l - 2 * errs[best] + r; if (den > 1e-9) return best + (0.5 * (l - r)) / den; }
+    return best;
+  }
+  async function analyzeShake(c, onProgress, isCancelled) {
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = c.src.currentSrc || c.src.src;
+    // 画面には見せないが、コマを受け取れるようにページに置く
+    v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+    document.body.appendChild(v);
+    const cleanup = () => { v.pause(); v.removeAttribute('src'); v.load(); v.remove(); };
+    try {
+      await new Promise((r, j) => { v.onloadeddata = r; v.onerror = () => j(new Error('load')); });
+      const aw = 160, ah = Math.max(16, Math.round((160 * c.h) / c.w));
+      const cv = new OffscreenCanvas(aw, ah), x = cv.getContext('2d', { willReadFrequently: true });
+      const maxX = Math.round(aw * 0.1), maxY = Math.round(ah * 0.1);
+      const times = [], px = [], py = [];
+      let prev = null, ax = 0, ay = 0;
+      const take = (t) => {
+        x.drawImage(v, 0, 0, aw, ah);
+        const p = profiles(x.getImageData(0, 0, aw, ah).data, aw, ah);
+        if (prev) { ax += bestShift(prev.col, p.col, maxX); ay += bestShift(prev.row, p.row, maxY); }
+        prev = p; times.push(t); px.push(ax); py.push(ay);
+      };
+      let viaPlayback = false;
+      if ('requestVideoFrameCallback' in v) {
+        // 2倍速で再生しながら、表示されるコマを順に読む（1コマずつ探すより速い）
+        viaPlayback = await new Promise((res) => {
+          let got = 0, done = false;
+          const finish = (ok) => { if (!done) { done = true; v.pause(); res(ok); } };
+          const step = (_now, meta) => {
+            if (done) return;
+            if (isCancelled()) return finish(true);
+            take(meta.mediaTime); got++;
+            if (got % 6 === 0) onProgress(Math.min(0.99, meta.mediaTime / c.duration));
+            if (v.ended) return finish(true);
+            v.requestVideoFrameCallback(step);
+          };
+          v.requestVideoFrameCallback(step);
+          v.onended = () => setTimeout(() => finish(true), 50);
+          setTimeout(() => { if (!got) finish(false); }, 4000);
+          v.playbackRate = 2;
+          v.play().catch(() => finish(false));
+        });
+      }
+      if (!viaPlayback) {
+        // 再生で読めない環境では、1コマずつ位置を合わせて読む
+        times.length = px.length = py.length = 0; prev = null; ax = ay = 0;
+        const n = Math.max(2, Math.floor(c.duration * STAB_FPS));
+        for (let i = 0; i < n; i++) {
+          if (isCancelled()) break;
+          await new Promise((r) => { const done = () => { v.removeEventListener('seeked', done); r(); }; v.addEventListener('seeked', done); v.currentTime = Math.min(c.duration - 0.03, i / STAB_FPS); });
+          take(v.currentTime);
+          if (i % 6 === 0) onProgress(i / n);
+        }
+      }
+      if (isCancelled() || times.length < 2) return null;
+      // 一定の間隔（1秒30コマ）にそろえる
+      const n = Math.max(2, Math.floor(c.duration * STAB_FPS));
+      const k = c.w / aw;
+      const gx = new Array(n), gy = new Array(n);
+      let j = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / STAB_FPS;
+        while (j < times.length - 2 && times[j + 1] < t) j++;
+        const t0 = times[j], t1 = times[j + 1];
+        const r = t1 > t0 ? Math.max(0, Math.min(1, (t - t0) / (t1 - t0))) : 0;
+        gx[i] = (px[j] * (1 - r) + px[j + 1] * r) * k;
+        gy[i] = (py[j] * (1 - r) + py[j + 1] * r) * k;
+      }
+      return { fps: STAB_FPS, px: gx, py: gy };
+    } finally {
+      cleanup();
+    }
+  }
+  function makeStab(raw, level, c) {
+    if (!raw || level === 'off') return null;
+    const half = Math.max(1, Math.round((STAB_LEVELS[level].win * raw.fps) / 2));
+    const smooth = (a) => a.map((_, i) => {
+      let s = 0, n = 0;
+      for (let j = Math.max(0, i - half); j <= Math.min(a.length - 1, i + half); j++) { s += a[j]; n++; }
+      return s / n;
+    });
+    const sx = smooth(raw.px), sy = smooth(raw.py);
+    // 絵の中身が右へ動いたら、左へ戻す
+    let cx = raw.px.map((p, i) => sx[i] - p), cy = raw.py.map((p, i) => sy[i] - p);
+    const p95 = (a) => { const b = a.map(Math.abs).sort((m, n) => m - n); return b[Math.floor(b.length * 0.95)] || 0; };
+    const need = Math.max((2 * p95(cx)) / c.w, (2 * p95(cy)) / c.h);
+    const zoom = Math.min(1.2, 1 + need + 0.01);
+    const mx = (c.w * (zoom - 1)) / 2, my = (c.h * (zoom - 1)) / 2;
+    cx = cx.map((q) => Math.max(-mx, Math.min(mx, q)));
+    cy = cy.map((q) => Math.max(-my, Math.min(my, q)));
+    return { fps: raw.fps, cx, cy, zoom };
+  }
+
   // ================= トリミング（動画のどこを使うか選ぶ） =================
   const fmtS = (t) => {
     const m = Math.floor(t / 60), s = t - m * 60;
@@ -1047,13 +1200,15 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
   function openTrim(c) {
     if (playing) stop();
     tr.c = c; tr.tin = c.tin; tr.tout = c.tout; tr.pos = c.tin;
+    tr.level = c.stabLevel || 'off'; tr.raw = c.stabRaw || null; tr.stab = c.stab || null;
+    renderStabUI();
     const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = c.src.currentSrc || c.src.src;
     tr.v = v;
     const cv = $('trimCanvas');
     const sc = Math.min(1, 960 / Math.max(c.w, c.h));
     cv.width = Math.round(c.w * sc); cv.height = Math.round(c.h * sc);
-    $('trimTitle').textContent = `カット${String(cuts.indexOf(c) + 1).padStart(2, '0')}のトリミング`;
+    $('trimTitle').textContent = `カット${String(cuts.indexOf(c) + 1).padStart(2, '0')}の編集（トリミング・手ぶれ補正）`;
     $('trimInfo').textContent = `${c.name}・全体 ${fmtS(c.duration)}`;
     $('trimIn').max = $('trimOut').max = c.duration.toFixed(1);
     $('trim').hidden = false;
@@ -1068,9 +1223,10 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     if (apply && tr.c) {
       tr.c.tin = Math.round(tr.tin * 10) / 10;
       tr.c.tout = Math.round(tr.tout * 10) / 10;
+      tr.c.stabLevel = tr.level; tr.c.stabRaw = tr.raw; tr.c.stab = tr.stab;
       refresh();
     }
-    tr.filmToken++;
+    tr.filmToken++; tr.stabToken = (tr.stabToken || 0) + 1;
     if (tr.v) { tr.v.removeAttribute('src'); tr.v.load(); }
     tr.v = null; tr.c = null;
     $('trim').hidden = true;
@@ -1080,7 +1236,10 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     if (!tr.v || !tr.c) return;
     const cv = $('trimCanvas'), x = cv.getContext('2d');
     x.fillStyle = '#000'; x.fillRect(0, 0, cv.width, cv.height);
-    if (tr.v.readyState >= 2) x.drawImage(tr.v, 0, 0, cv.width, cv.height);
+    if (tr.v.readyState >= 2) {
+      const sb = stabAt(tr.stab, tr.v.currentTime);
+      drawCover(x, tr.v, tr.c.w, tr.c.h, cv.width, cv.height, sb.zoom, sb.dx, sb.dy);
+    }
   }
   function seekTrim(t) {
     if (!tr.v) return;
@@ -1101,7 +1260,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       if (token !== tr.filmToken) break;
       const cv = document.createElement('canvas'); cv.width = 96; cv.height = 54;
       film.appendChild(cv);
-      await new Promise((r) => { const done = () => { v.removeEventListener('seeked', done); r(); }; v.addEventListener('seeked', done); v.currentTime = Math.min(c.duration - 0.05, (c.duration * (i + 0.5)) / n); });
+      await new Promise((r) => { const done = () => { v.removeEventListener('seeked', done); r(); }; v.addEventListener('seeked', done); v.currentTime = Math.min(c.duration - 0.3, (c.duration * (i + 0.5)) / n); });
       if (token !== tr.filmToken) break;
       drawCover(cv.getContext('2d'), v, c.w, c.h, 96, 54, 1);
     }
@@ -1173,6 +1332,47 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
   $('trim').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTrim(false); });
   $('trim').addEventListener('pointerdown', (e) => { if (e.target === $('trim')) closeTrim(false); });
 
+  function renderStabUI() {
+    document.querySelectorAll('#stabSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.l === tr.level)));
+    const msg = $('stabMsg');
+    if (tr.level === 'off') msg.textContent = '揺れが気になる動画で使ってください';
+    else if (tr.stab) msg.textContent = `補正中（画面を${Math.round((tr.stab.zoom - 1) * 100)}%拡大して端を隠しています）。「▶ 範囲を再生」で確かめられます`;
+  }
+  document.querySelectorAll('#stabSeg button').forEach((b) => (b.onclick = async () => {
+    if (!tr.c) return;
+    tr.level = b.dataset.l;
+    if (tr.level === 'off') { tr.stab = null; renderStabUI(); drawTrimFrame(); return; }
+    if (!tr.raw) {
+      // 初回だけ揺れを読み取る（動画の長さによって数秒〜数十秒）
+      stopTrimPlay();
+      const token = (tr.stabToken = (tr.stabToken || 0) + 1);
+      const c = tr.c;
+      renderStabUI();
+      $('stabProg').hidden = false; $('stabProg').firstElementChild.style.width = '0%';
+      $('stabMsg').textContent = '揺れを読み取っています…';
+      document.querySelectorAll('#stabSeg button').forEach((x) => (x.disabled = true));
+      try {
+        const raw = await analyzeShake(c, (p) => {
+          if (token !== tr.stabToken) return;
+          $('stabProg').firstElementChild.style.width = Math.round(p * 100) + '%';
+          $('stabMsg').textContent = `揺れを読み取っています… ${Math.round(p * 100)}%`;
+        }, () => token !== tr.stabToken);
+        if (!raw || token !== tr.stabToken || tr.c !== c) return;
+        tr.raw = raw;
+      } catch (e) {
+        tr.level = 'off'; renderStabUI();
+        $('stabMsg').textContent = '揺れを読み取れませんでした';
+        return;
+      } finally {
+        $('stabProg').hidden = true;
+        document.querySelectorAll('#stabSeg button').forEach((x) => (x.disabled = false));
+      }
+    }
+    tr.stab = makeStab(tr.raw, tr.level, tr.c);
+    renderStabUI();
+    seekTrim(tr.pos);
+  }));
+
   // 範囲だけ再生
   function stopTrimPlay() {
     tr.playing = false; cancelAnimationFrame(tr.raf);
@@ -1218,8 +1418,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       const no = document.createElement('div'); no.className = 'no'; no.textContent = String(i + 1).padStart(2, '0');
       const th = document.createElement('div'); th.className = 'thumb'; th.appendChild(thumbCanvas(c));
       const badge = document.createElement('span'); badge.className = 'badge';
-      badge.textContent = c.sample ? 'サンプル' : c.kind === 'video' ? (c.tin > 0.05 || c.tout < c.duration - 0.05 ? `✂ ${fmtS(c.tin)}〜${fmtS(c.tout)}` : `動画 ${c.duration.toFixed(1)}秒`) : '写真';
-      if (c.kind === 'video' && !c.sample) { th.classList.add('clickable'); th.title = 'クリックでトリミング'; th.onclick = () => openTrim(c); }
+      badge.textContent = c.sample ? 'サンプル' : c.kind === 'video' ? (c.tin > 0.05 || c.tout < c.duration - 0.05 ? `✂ ${fmtS(c.tin)}〜${fmtS(c.tout)}` : `動画 ${c.duration.toFixed(1)}秒`) + (c.stab ? `・補正：${STAB_LEVELS[c.stabLevel].name}` : '') : '写真';
+      if (c.kind === 'video' && !c.sample) { th.classList.add('clickable'); th.title = 'クリックでトリミング・手ぶれ補正'; th.onclick = () => openTrim(c); }
       th.appendChild(badge);
       const fields = document.createElement('div'); fields.className = 'fields';
       const nm = document.createElement('div'); nm.className = 'fname'; nm.textContent = c.name;
@@ -1267,7 +1467,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       );
       if (c.kind === 'video' && !c.sample) {
         const tb = mk('✂', `カット${i + 1}の使う範囲を選ぶ（トリミング）`, () => openTrim(c));
-        tb.title = 'トリミング（使う範囲を選ぶ）'; tb.classList.add('trimbtn');
+        tb.title = 'トリミング・手ぶれ補正'; tb.classList.add('trimbtn');
         ops.prepend(tb);
       }
       li.append(no, th, fields, ops);
@@ -1317,6 +1517,15 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     ensureFonts().then(() => { if (!playing) drawPreview(); });
     rebuild();
   }));
+  const showLogoSize = () => { $('logoSize').value = Math.round(S.logoScale * 100); $('logoSizeTxt').textContent = Math.round(S.logoScale * 100) + '%'; };
+  showLogoSize();
+  $('logoSize').addEventListener('input', (e) => {
+    S.logoScale = Number(e.target.value) / 100; showLogoSize(); saveSettings();
+    // 最後の画面を見せる
+    const end = timeline.segs.find((x) => x.type === 'end');
+    if (end && !playing) { curT = end.start + end.dur / 2; }
+    if (!playing) drawPreview();
+  });
   $('cutTr').onchange = (e) => { S.cutTr = e.target.value; saveSettings(); rebuild(); };
   $('textTr').onchange = (e) => { S.textTr = e.target.value; saveSettings(); rebuild(); };
   const setBg = (c) => { S.bg = c; saveSettings(); renderSettings(); rebuild(); };
@@ -1832,7 +2041,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
         const t = i / FPS;
         const seg = segAt(t);
         const local = t - seg.start;
-        if (seg.type === 'cut' && seg.cut.kind === 'video') await seekVideo(seg.cut.src, seg.cut.tin + local);
+        if (seg.type === 'cut' && seg.cut.kind === 'video') await seekVideo(seg.cut.src, seg.cut.tin + local + 0.002);
         drawSeg(octx, W, H, seg, local);
         const frame = new VideoFrame(oc, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
         enc.encode(frame, { keyFrame: i % (FPS * 2) === 0 });
