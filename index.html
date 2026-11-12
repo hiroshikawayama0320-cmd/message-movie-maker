@@ -190,6 +190,30 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 .duration input { width: 4.6em; font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; padding: 4px 6px; }
 .pair input[type=number] { padding: 4px 8px; font-family: var(--font-mono); }
 
+/* ---- トリミング ---- */
+.thumb.clickable { cursor: pointer; }
+.thumb.clickable:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ops .trimbtn { color: var(--accent); }
+.trim { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.trim-box { width: 100%; max-width: 820px; max-height: 100%; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.trim-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.trim-head h2 { font-family: var(--font-display); font-size: 1.05rem; letter-spacing: .06em; }
+.trim-view { background: var(--screen); border-radius: 8px; display: flex; justify-content: center; align-items: center; height: min(46vh, 420px); overflow: hidden; }
+.trim-view canvas { max-width: 100%; max-height: 100%; display: block; }
+.trim-bar { position: relative; height: 54px; border-radius: 6px; background: var(--field); touch-action: none; cursor: pointer; user-select: none; }
+.trim-film { position: absolute; inset: 0; display: flex; overflow: hidden; border-radius: 6px; }
+.trim-film canvas { flex: 1 1 0; min-width: 0; height: 100%; object-fit: cover; }
+.trim-dim { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,.62); pointer-events: none; }
+.trim-dim:first-of-type { border-radius: 6px 0 0 6px; }
+.trim-sel { position: absolute; top: 0; bottom: 0; border-top: 3px solid var(--accent); border-bottom: 3px solid var(--accent); pointer-events: none; }
+.trim-h { position: absolute; top: -4px; bottom: -4px; width: 14px; margin-left: -7px; padding: 0; border-radius: 4px; background: var(--accent); border: 0; cursor: ew-resize; }
+.trim-h::after { content: ""; position: absolute; left: 6px; top: 35%; height: 30%; width: 2px; background: var(--accent-ink); opacity: .7; }
+.trim-head-line { position: absolute; top: -6px; bottom: -6px; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); pointer-events: none; }
+.trim-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trim-row label { display: flex; align-items: center; gap: 5px; font-size: .82rem; color: var(--muted); }
+.trim-row input { width: 5.5em; font-family: var(--font-mono); text-align: right; padding: 4px 6px; }
+.trim-row .spacer { flex: 1; }
+
 /* ---- パスワード画面 ---- */
 .gate { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
 .gate-box { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 26px; display: flex; flex-direction: column; gap: 10px; }
@@ -394,6 +418,41 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
   </div>
 </div>
 
+<div class="trim" id="trim" hidden role="dialog" aria-modal="true" aria-labelledby="trimTitle">
+  <div class="trim-box">
+    <div class="trim-head">
+      <h2 id="trimTitle">トリミング</h2>
+      <span class="note" id="trimInfo"></span>
+    </div>
+    <div class="trim-view"><canvas id="trimCanvas" width="640" height="360"></canvas></div>
+    <div class="trim-bar" id="trimBar" aria-label="使う範囲">
+      <div class="trim-film" id="trimFilm"></div>
+      <div class="trim-dim" id="trimDimL"></div>
+      <div class="trim-dim" id="trimDimR"></div>
+      <div class="trim-sel" id="trimSel"></div>
+      <button class="trim-h" id="trimHIn" type="button" aria-label="開始位置（左右キーで調整）"></button>
+      <button class="trim-h" id="trimHOut" type="button" aria-label="終了位置（左右キーで調整）"></button>
+      <div class="trim-head-line" id="trimPlayhead"></div>
+    </div>
+    <div class="trim-row">
+      <label for="trimIn">開始<input type="number" id="trimIn" min="0" step="0.1"><span>秒</span></label>
+      <label for="trimOut">終了<input type="number" id="trimOut" min="0" step="0.1"><span>秒</span></label>
+      <span class="tc" id="trimLen"></span>
+      <span class="spacer"></span>
+      <button type="button" id="trimPlay">▶ 範囲を再生</button>
+    </div>
+    <div class="trim-row">
+      <button type="button" id="trimSetIn">今の位置を開始に</button>
+      <button type="button" id="trimSetOut">今の位置を終了に</button>
+      <button type="button" class="ghost" id="trimReset">全体に戻す</button>
+      <span class="spacer"></span>
+      <button type="button" id="trimCancel">キャンセル</button>
+      <button type="button" class="primary" id="trimOk">決定</button>
+    </div>
+    <p class="note" id="trimNote"></p>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.4/build/webm-muxer.js"></script>
 <script>
@@ -450,7 +509,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
   function buildTimeline() {
     const raw = [];
     cuts.forEach((c, i) => {
-      raw.push({ type: 'cut', cut: c, idx: i, base: S.cutSec, limit: c.kind === 'video' ? c.duration : Infinity });
+      raw.push({ type: 'cut', cut: c, idx: i, base: S.cutSec, limit: c.kind === 'video' ? Math.max(0.5, c.tout - c.tin) : Infinity });
       const lines = c.msg.split('\n').map((s) => s.trim()).filter(Boolean);
       const hasMsg = lines.length > 0 || !!c.sub.trim();
       const isLast = i === cuts.length - 1;
@@ -819,7 +878,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       if (c.kind !== 'video') return;
       const active = seg && seg.type === 'cut' && seg.cut === c;
       if (!active) { if (!c.src.paused) c.src.pause(); return; }
-      if (Math.abs(c.src.currentTime - local) > 0.25) c.src.currentTime = Math.min(local, c.duration - 0.05);
+      const target = Math.min(c.tin + local, c.duration - 0.05);
+      if (Math.abs(c.src.currentTime - target) > 0.25) c.src.currentTime = target;
       if (wantPlay && c.src.paused) c.src.play().catch(() => {});
       if (!wantPlay && !c.src.paused) c.src.pause();
     });
@@ -914,7 +974,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       } catch (e) { URL.revokeObjectURL(url); throw e; }
       // 音だけ再生できて映像が出ない（HEVCなど）場合も失敗として扱う
       if (!v.videoWidth || !v.videoHeight) { URL.revokeObjectURL(url); throw new Error('decode'); }
-      return { kind: 'video', src: v, w: v.videoWidth, h: v.videoHeight, duration: v.duration };
+      return { kind: 'video', src: v, w: v.videoWidth, h: v.videoHeight, duration: v.duration, tin: 0, tout: v.duration };
     }
     return null;
   }
@@ -973,6 +1033,167 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
     stop(); bgmFile = f; bgmMode = 'file'; fileVersion++; saveBgm(); refresh();
   };
 
+
+  // ================= トリミング（動画のどこを使うか選ぶ） =================
+  const fmtS = (t) => {
+    const m = Math.floor(t / 60), s = t - m * 60;
+    return m ? `${m}:${s.toFixed(1).padStart(4, '0')}` : `${s.toFixed(1)}秒`;
+  };
+  const tr = { c: null, v: null, tin: 0, tout: 0, pos: 0, playing: false, raf: 0, filmToken: 0 };
+  function trimSegDur(c) {
+    const seg = timeline.segs.find((s) => s.type === 'cut' && s.cut === c);
+    return seg ? seg.dur : null;
+  }
+  function openTrim(c) {
+    if (playing) stop();
+    tr.c = c; tr.tin = c.tin; tr.tout = c.tout; tr.pos = c.tin;
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = c.src.currentSrc || c.src.src;
+    tr.v = v;
+    const cv = $('trimCanvas');
+    const sc = Math.min(1, 960 / Math.max(c.w, c.h));
+    cv.width = Math.round(c.w * sc); cv.height = Math.round(c.h * sc);
+    $('trimTitle').textContent = `カット${String(cuts.indexOf(c) + 1).padStart(2, '0')}のトリミング`;
+    $('trimInfo').textContent = `${c.name}・全体 ${fmtS(c.duration)}`;
+    $('trimIn').max = $('trimOut').max = c.duration.toFixed(1);
+    $('trim').hidden = false;
+    document.querySelector('.wrap').inert = true;
+    v.addEventListener('seeked', drawTrimFrame);
+    v.addEventListener('loadeddata', () => { seekTrim(tr.tin); buildFilm(); }, { once: true });
+    updateTrimUI();
+    $('trimHIn').focus();
+  }
+  function closeTrim(apply) {
+    stopTrimPlay();
+    if (apply && tr.c) {
+      tr.c.tin = Math.round(tr.tin * 10) / 10;
+      tr.c.tout = Math.round(tr.tout * 10) / 10;
+      refresh();
+    }
+    tr.filmToken++;
+    if (tr.v) { tr.v.removeAttribute('src'); tr.v.load(); }
+    tr.v = null; tr.c = null;
+    $('trim').hidden = true;
+    document.querySelector('.wrap').inert = false;
+  }
+  function drawTrimFrame() {
+    if (!tr.v || !tr.c) return;
+    const cv = $('trimCanvas'), x = cv.getContext('2d');
+    x.fillStyle = '#000'; x.fillRect(0, 0, cv.width, cv.height);
+    if (tr.v.readyState >= 2) x.drawImage(tr.v, 0, 0, cv.width, cv.height);
+  }
+  function seekTrim(t) {
+    if (!tr.v) return;
+    tr.pos = Math.max(0, Math.min(t, tr.c.duration - 0.03));
+    tr.v.currentTime = tr.pos;
+    updatePlayhead();
+  }
+  // 下の帯に、動画から10コマを並べる
+  async function buildFilm() {
+    const film = $('trimFilm'); film.innerHTML = '';
+    const token = ++tr.filmToken;
+    const c = tr.c;
+    const v = document.createElement('video');
+    v.muted = true; v.preload = 'auto'; v.src = tr.v.src;
+    await new Promise((r) => { v.onloadeddata = r; v.onerror = r; });
+    const n = 10;
+    for (let i = 0; i < n; i++) {
+      if (token !== tr.filmToken) break;
+      const cv = document.createElement('canvas'); cv.width = 96; cv.height = 54;
+      film.appendChild(cv);
+      await new Promise((r) => { const done = () => { v.removeEventListener('seeked', done); r(); }; v.addEventListener('seeked', done); v.currentTime = Math.min(c.duration - 0.05, (c.duration * (i + 0.5)) / n); });
+      if (token !== tr.filmToken) break;
+      drawCover(cv.getContext('2d'), v, c.w, c.h, 96, 54, 1);
+    }
+    v.removeAttribute('src'); v.load();
+  }
+  function pct(t) { return (t / tr.c.duration) * 100; }
+  function updatePlayhead() { if (tr.c) $('trimPlayhead').style.left = pct(tr.pos) + '%'; }
+  function updateTrimUI() {
+    const c = tr.c; if (!c) return;
+    const a = pct(tr.tin), b = pct(tr.tout);
+    $('trimHIn').style.left = a + '%'; $('trimHOut').style.left = b + '%';
+    $('trimSel').style.left = a + '%'; $('trimSel').style.width = (b - a) + '%';
+    $('trimDimL').style.left = '0'; $('trimDimL').style.width = a + '%';
+    $('trimDimR').style.left = b + '%'; $('trimDimR').style.width = (100 - b) + '%';
+    if (document.activeElement !== $('trimIn')) $('trimIn').value = tr.tin.toFixed(1);
+    if (document.activeElement !== $('trimOut')) $('trimOut').value = tr.tout.toFixed(1);
+    const len = tr.tout - tr.tin;
+    $('trimLen').textContent = `使う長さ ${len.toFixed(1)}秒`;
+    const d = trimSegDur(c);
+    $('trimNote').textContent = d == null ? '' :
+      `動画の中では、開始位置から最長で終了位置まで使います。いまの設定だと、このカットは約${Math.min(d, len).toFixed(1)}秒です` +
+      (len > d + 0.05 ? `（全体の長さに合わせるため、終了位置より前で次の画面に切り替わります）。` : '。');
+    updatePlayhead();
+  }
+  const MIN_LEN = 0.5;
+  function setIn(t) { tr.tin = Math.max(0, Math.min(t, tr.tout - MIN_LEN)); updateTrimUI(); }
+  function setOut(t) { tr.tout = Math.min(tr.c.duration, Math.max(t, tr.tin + MIN_LEN)); updateTrimUI(); }
+
+  // 帯の上のドラッグ（つまみは範囲、それ以外は再生位置）
+  {
+    const bar = $('trimBar');
+    let drag = null;
+    const timeAt = (e) => { const r = bar.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * tr.c.duration; };
+    bar.addEventListener('pointerdown', (e) => {
+      if (!tr.c) return;
+      e.preventDefault();
+      drag = e.target === $('trimHIn') ? 'in' : e.target === $('trimHOut') ? 'out' : 'pos';
+      bar.setPointerCapture(e.pointerId);
+      stopTrimPlay();
+      move(e);
+    });
+    const move = (e) => {
+      if (!drag) return;
+      const t = timeAt(e);
+      if (drag === 'in') { setIn(t); seekTrim(tr.tin); }
+      else if (drag === 'out') { setOut(t); seekTrim(tr.tout - 0.05); }
+      else seekTrim(t);
+    };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', () => { drag = null; });
+    bar.addEventListener('pointercancel', () => { drag = null; });
+    const keyNudge = (which) => (e) => {
+      const step = e.shiftKey ? 1 : 0.1;
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const d = e.key === 'ArrowLeft' ? -step : step;
+      if (which === 'in') { setIn(tr.tin + d); seekTrim(tr.tin); } else { setOut(tr.tout + d); seekTrim(tr.tout - 0.05); }
+    };
+    $('trimHIn').addEventListener('keydown', keyNudge('in'));
+    $('trimHOut').addEventListener('keydown', keyNudge('out'));
+  }
+  $('trimIn').addEventListener('change', (e) => { const v = Number(e.target.value); if (Number.isFinite(v)) { setIn(v); seekTrim(tr.tin); } e.target.value = tr.tin.toFixed(1); });
+  $('trimOut').addEventListener('change', (e) => { const v = Number(e.target.value); if (Number.isFinite(v)) { setOut(v); seekTrim(tr.tout - 0.05); } e.target.value = tr.tout.toFixed(1); });
+  $('trimSetIn').onclick = () => { setIn(tr.pos); };
+  $('trimSetOut').onclick = () => { setOut(tr.pos); };
+  $('trimReset').onclick = () => { tr.tin = 0; tr.tout = tr.c.duration; updateTrimUI(); seekTrim(0); };
+  $('trimCancel').onclick = () => closeTrim(false);
+  $('trimOk').onclick = () => closeTrim(true);
+  $('trim').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTrim(false); });
+  $('trim').addEventListener('pointerdown', (e) => { if (e.target === $('trim')) closeTrim(false); });
+
+  // 範囲だけ再生
+  function stopTrimPlay() {
+    tr.playing = false; cancelAnimationFrame(tr.raf);
+    if (tr.v) tr.v.pause();
+    $('trimPlay').textContent = '▶ 範囲を再生';
+  }
+  $('trimPlay').onclick = () => {
+    if (!tr.v) return;
+    if (tr.playing) { stopTrimPlay(); return; }
+    tr.playing = true; $('trimPlay').textContent = '■ 停止';
+    tr.v.currentTime = (tr.pos >= tr.tin && tr.pos < tr.tout - 0.1) ? tr.pos : tr.tin;
+    tr.v.play().catch(() => stopTrimPlay());
+    const loop = () => {
+      if (!tr.playing || !tr.v) return;
+      tr.pos = tr.v.currentTime; updatePlayhead(); drawTrimFrame();
+      if (tr.v.currentTime >= tr.tout || tr.v.ended) { stopTrimPlay(); seekTrim(tr.tin); return; }
+      tr.raf = requestAnimationFrame(loop);
+    };
+    tr.raf = requestAnimationFrame(loop);
+  };
+
   // ---- 一覧の表示 ----
   function thumbCanvas(c) {
     const cv = document.createElement('canvas'); cv.width = 192; cv.height = 120;
@@ -982,7 +1203,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       const v = c.src;
       if (v.readyState >= 2) paint();
       v.addEventListener('seeked', function once() { paint(); v.removeEventListener('seeked', once); });
-      if (v.currentTime === 0) v.currentTime = Math.min(0.5, c.duration / 2);
+      const want = Math.min(c.tin + 0.3, c.tout - 0.05);
+      if (Math.abs(v.currentTime - want) > 0.05) v.currentTime = want; else if (v.readyState >= 2) paint();
     } else paint();
     return cv;
   }
@@ -996,7 +1218,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
       const no = document.createElement('div'); no.className = 'no'; no.textContent = String(i + 1).padStart(2, '0');
       const th = document.createElement('div'); th.className = 'thumb'; th.appendChild(thumbCanvas(c));
       const badge = document.createElement('span'); badge.className = 'badge';
-      badge.textContent = c.sample ? 'サンプル' : c.kind === 'video' ? `動画 ${c.duration.toFixed(1)}秒` : '写真';
+      badge.textContent = c.sample ? 'サンプル' : c.kind === 'video' ? (c.tin > 0.05 || c.tout < c.duration - 0.05 ? `✂ ${fmtS(c.tin)}〜${fmtS(c.tout)}` : `動画 ${c.duration.toFixed(1)}秒`) : '写真';
+      if (c.kind === 'video' && !c.sample) { th.classList.add('clickable'); th.title = 'クリックでトリミング'; th.onclick = () => openTrim(c); }
       th.appendChild(badge);
       const fields = document.createElement('div'); fields.className = 'fields';
       const nm = document.createElement('div'); nm.className = 'fname'; nm.textContent = c.name;
@@ -1042,6 +1265,11 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
         mk('↓', `カット${i + 1}を下へ`, () => { [cuts[i + 1], cuts[i]] = [cuts[i], cuts[i + 1]]; refresh(); }, i === cuts.length - 1),
         mk('×', `カット${i + 1}を削除`, () => { cuts.splice(i, 1); refresh(); }),
       );
+      if (c.kind === 'video' && !c.sample) {
+        const tb = mk('✂', `カット${i + 1}の使う範囲を選ぶ（トリミング）`, () => openTrim(c));
+        tb.title = 'トリミング（使う範囲を選ぶ）'; tb.classList.add('trimbtn');
+        ops.prepend(tb);
+      }
       li.append(no, th, fields, ops);
       ol.appendChild(li);
     });
@@ -1604,7 +1832,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
         const t = i / FPS;
         const seg = segAt(t);
         const local = t - seg.start;
-        if (seg.type === 'cut' && seg.cut.kind === 'video') await seekVideo(seg.cut.src, local);
+        if (seg.type === 'cut' && seg.cut.kind === 'video') await seekVideo(seg.cut.src, seg.cut.tin + local);
         drawSeg(octx, W, H, seg, local);
         const frame = new VideoFrame(oc, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
         enc.encode(frame, { keyFrame: i % (FPS * 2) === 0 });
